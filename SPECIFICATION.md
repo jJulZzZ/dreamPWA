@@ -15,7 +15,7 @@ Rêveil est un journal de rêves personnel, mobile et francophone. Il permet de 
 ## Modèle de données
 
 - `Dream` : UUID, date locale modifiable, dates de création/mise à jour, mode de capture, texte nettoyé, transcription brute optionnelle, catégorie, confidentialité, état, analyse, erreur, date de corbeille.
-- `DreamAnalysis` : personnages, lieux, thèmes, maximum cinq mots-clés, émotions, niveau de détail 1–5 et version de schéma.
+- `DreamAnalysis` : titre court français (3–8 mots, 100 caractères maximum), personnages, lieux, thèmes, maximum cinq mots-clés, émotions, niveau de détail 1–5 et version de schéma. Le titre est modifiable ; les anciens rêves sans titre restent compatibles.
 - `Category` : UUID, nom, couleur et marqueur système. `Normal`, `Lucide` et `Scénario` sont créées initialement ; le défaut est `Normal`.
 - `AudioRecord` : blob audio temporaire, type MIME et date, référencé par l’UUID du rêve.
 - `Settings` : profil personnel libre et hash salé du PIN.
@@ -28,15 +28,21 @@ Les comparaisons statistiques utilisent une clé Unicode normalisée et en minus
 
 Le PIN numérique à six chiffres masque l’interface des rêves privés jusqu’à son déverrouillage en session. Les cartes privées affichent seulement date et cadenas, et sont exclues de la recherche, des statistiques et de l’export tant qu’elles restent verrouillées. Il s’agit d’un masquage d’interface, pas d’un chiffrement : IndexedDB reste techniquement accessible depuis le navigateur.
 
+Le PIN est créé et confirmé lors du premier marquage privé. Le changement dans les réglages exige toujours l’ancien PIN. Une réinitialisation pour oubli demande confirmation, supprime définitivement tous les rêves privés (corbeille incluse) et leurs audios dans une transaction, et retire le PIN. Elle préserve les rêves publics et le profil. Annuler la création du PIN ne marque pas le rêve comme privé.
+
+Les rêves à traiter (états non validés ou analyse obsolète) sont rouges dans le journal et le calendrier, indépendamment de leur catégorie. Le calendrier affiche une case par rêve ; cliquer sur un jour, y compris sur ses cases, sélectionne le jour et affiche sa liste de rêves. La liste permet ensuite d’ouvrir chaque rêve.
+
 Les suppressions passent dans une corbeille restaurable 30 jours. L’export JSON versionné n’inclut jamais de blobs audio. L’import propose fusion par UUID ou remplacement confirmé.
 
 ## IA
 
-Tous les prompts et contenus d’interface sont français. Le navigateur n’accède jamais directement à une clé : trois fonctions Vercel appellent Vercel AI Gateway avec `AI_GATEWAY_API_KEY` côté serveur.
+Tous les prompts et contenus d’interface sont français. Le navigateur n’accède jamais directement à une clé : trois fonctions Vercel appellent directement l’API OpenAI avec `OPENAI_API_KEY` côté serveur. Localement, cette variable est renseignée dans `.env`, ignoré par Git.
 
-- `openai/gpt-4o-transcribe` : transcription française d’un blob vocal.
-- `openai/gpt-6-luna`, raisonnement minimal : nettoyage factuel de transcription, sans ajout ni interprétation.
-- `openai/gpt-6-luna`, raisonnement faible : extraction contrainte par JSON Schema strict et validée par Zod.
+- `gpt-4o-transcribe` : transcription française d’un blob vocal.
+- `gpt-6-luna`, raisonnement faible (`low`) : nettoyage factuel de transcription, sans ajout ni interprétation. `minimal` n’est pas pris en charge par ce modèle sur l’API directe.
+- `gpt-6-luna`, raisonnement faible : extraction contrainte par JSON Schema strict et validée par Zod.
+
+Les prompts et fonctions sont partagés dans `server/ai.ts` avec un banc d’essai Node local : `npm run ai:test -- example/dream1.txt`. Un texte passe par nettoyage puis extraction ; un audio ajoute la transcription. Les sorties intermédiaires sont affichées et sauvegardées dans `test-results/`.
 
 Le profil personnel est inclus uniquement dans l’extracteur afin de rendre explicites les surnoms et relations connus. L’extracteur ne doit pas inférer de diagnostic ou inventer des informations.
 

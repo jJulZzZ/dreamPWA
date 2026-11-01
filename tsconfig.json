@@ -5,11 +5,12 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "allowJs": false,
     "types": ["vite/client"]
   },
-  "include": ["src", "api", "vite.config.ts"]
+  "include": ["src", "api", "server", "vite.config.ts"]
 }
