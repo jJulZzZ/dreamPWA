@@ -2,6 +2,8 @@ export type DreamStatus = 'a_transcrire' | 'a_nettoyer' | 'a_analyser' | 'a_vali
 export type CaptureMode = 'texte' | 'vocal';
 
 export interface DreamAnalysis {
+  /** Optional only for compatibility with dreams saved before titles existed. */
+  title?: string;
   characters: string[];
   places: string[];
   themes: string[];
@@ -25,6 +27,7 @@ export interface Dream {
   analysis?: DreamAnalysis;
   analysisStale?: boolean;
   error?: string;
+  retryStatus?: Exclude<DreamStatus, 'erreur'>;
   deletedAt?: string;
 }
 

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const analysisSchema = z.object({
+  title: z.string().trim().min(1).max(100),
   characters: z.array(z.string().trim().min(1)).default([]),
   places: z.array(z.string().trim().min(1)).default([]),
   themes: z.array(z.string().trim().min(1)).default([]),
@@ -13,8 +14,9 @@ export const analysisSchema = z.object({
 export const analysisJsonSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['characters', 'places', 'themes', 'keywords', 'feelings', 'detailLevel', 'schemaVersion'],
+  required: ['title', 'characters', 'places', 'themes', 'keywords', 'feelings', 'detailLevel', 'schemaVersion'],
   properties: {
+    title: { type: 'string', minLength: 1, maxLength: 100 },
     characters: { type: 'array', items: { type: 'string' } },
     places: { type: 'array', items: { type: 'string' } },
     themes: { type: 'array', items: { type: 'string' } },

@@ -1,9 +1,11 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
+import { localAiPlugin } from './dev/ai-plugin.ts';
 
 export default defineConfig({
   plugins: [
+    localAiPlugin(),
     svelte(),
     VitePWA({
       registerType: 'autoUpdate',
