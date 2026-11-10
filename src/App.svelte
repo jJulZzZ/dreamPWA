@@ -45,6 +45,8 @@
   let statsFrom = new Date(new Date().getFullYear(), 0, 1).toLocaleDateString('en-CA');
   let statsTo = today();
   let showRaw = false;
+  let dreamTab: 'dream' | 'analysis' = 'dream';
+  let editingDreamText = false;
   let editorLists: Pick<DreamAnalysis, 'characters' | 'places' | 'themes' | 'keywords' | 'feelings'> = { characters: [], places: [], themes: [], keywords: [], feelings: [] };
 
   $: existingLabels = collectLabels(dreams, Boolean(selected?.isPrivate && unlocked));
@@ -73,7 +75,7 @@
   }
   function openDream(dream: Dream) {
     if (dream.isPrivate && !unlocked) { openPin(settings.pinHash ? 'unlock' : 'create', () => openDream(dream)); return; }
-    selected = structuredClone(dream); setEditorLists(selected.analysis); showRaw = false;
+    selected = structuredClone(dream); setEditorLists(selected.analysis); showRaw = false; dreamTab = 'dream'; editingDreamText = false;
   }
   function openPin(purpose: typeof pinPurpose, action: (() => void | Promise<void>) | null = null) {
     pinPurpose = purpose; pinValue = ''; newPinValue = ''; confirmPinValue = ''; pinAction = action; pinDialog = true;
@@ -285,14 +287,33 @@
   <button class:record={recording} class="voice-button" disabled={microphonePending} on:click={() => recording ? stopRecording() : startRecording()}>{microphonePending ? 'Accès au microphone…' : recording ? '■ Arrêter' : voiceBlob ? '↻ Réenregistrer' : '◉ Commencer l’enregistrement'}</button>{/if}
   <div class="form-grid"><label>Date<input type="date" bind:value={draftDate} /></label><label>Catégorie<select bind:value={draftCategory}>{#each categories as category}<option value={category.id}>{category.name}</option>{/each}</select></label></div><label class="private-toggle"><input type="checkbox" checked={draftPrivate} on:change={(event) => { const value = event.currentTarget.checked; event.currentTarget.checked = draftPrivate; makePrivate('draft', value); }} /> Rêve privé</label><button class="primary" disabled={recording || microphonePending || (captureMode === 'vocal' ? !voiceBlob : !draftText.trim())} on:click={saveDraft}>Enregistrer localement</button></section></div>{/if}
 
-{#if selected}<div class="overlay editor-overlay"><section class="modal editor"><button class="close" on:click={() => selected = null}>×</button><p class="eyebrow">{selected.status === 'analyse' ? 'RÊVE VALIDÉ' : selected.status.replaceAll('_', ' ').toUpperCase()}</p><h2>{selected.analysis?.title || formatDate(selected.date)}</h2><div class="form-grid"><label>Date<input type="date" bind:value={selected.date} /></label><label>Catégorie<select bind:value={selected.categoryId}>{#each categories as category}<option value={category.id}>{category.name}</option>{/each}</select></label></div><label class="private-toggle"><input type="checkbox" checked={selected.isPrivate} on:change={(event) => { const value = event.currentTarget.checked; event.currentTarget.checked = selected!.isPrivate; makePrivate('selected', value); }} /> Rêve privé</label>
-  {#if selected.captureMode === 'vocal' && selected.rawText}<button class="raw-toggle" on:click={() => showRaw = !showRaw}>{showRaw ? 'Masquer' : 'Voir'} la transcription brute</button>{#if showRaw}<blockquote>{selected.rawText}</blockquote>{/if}{/if}
-  <textarea class="dream-text" bind:value={selected.cleanedText} placeholder="Votre rêve…"></textarea>
-  {#if selected.error}<p class="error">{selected.error}</p>{/if}
-  <p class="privacy-note">Pour l’analyse, les libellés existants de vos rêves publics sont envoyés au service IA. Pour un rêve privé déverrouillé, ceux des rêves privés le sont aussi.</p>
-  {#if selected.status !== 'analyse' || selected.analysisStale}<button class="primary" disabled={loading} on:click={() => processDream(selected!.id)}>{loading ? 'Analyse en cours…' : selected.analysisStale ? 'Ré-analyser le texte' : 'Lancer l’analyse'}</button>{/if}
-  {#if selected.analysis}<section class="analysis"><div class="analysis-head"><h3>Analyse à valider</h3><span class="grade">{selected.analysis.detailLevel}/5</span></div><label>Titre du rêve<input bind:value={selected.analysis.title} maxlength="100" placeholder="Un titre court" /></label><p class="muted">{detailLabels[selected.analysis.detailLevel - 1]}</p><TagEditor label="Personnages" bind:values={editorLists.characters} suggestions={existingLabels.characters} /><TagEditor label="Lieux" bind:values={editorLists.places} suggestions={existingLabels.places} /><TagEditor label="Thèmes" bind:values={editorLists.themes} suggestions={existingLabels.themes} /><TagEditor label="Mots-clés" bind:values={editorLists.keywords} suggestions={existingLabels.keywords} max={5} /><TagEditor label="Émotions" bind:values={editorLists.feelings} suggestions={existingLabels.feelings} /><label>Niveau de détail<select bind:value={selected.analysis.detailLevel}>{#each [1,2,3,4,5] as level}<option value={level}>{level}/5 — {detailLabels[level - 1]}</option>{/each}</select></label></section>{/if}
-  <div class="editor-actions"><button class="secondary" on:click={() => saveSelected(false)}>Enregistrer</button>{#if selected.analysis}<button class="primary" on:click={() => saveSelected(true)}>Valider l’analyse</button>{/if}</div><button class="danger" on:click={trashSelected}>Placer dans la corbeille</button></section></div>{/if}
+{#if selected}<div class="overlay editor-overlay"><section class="modal editor"><button class="close" aria-label="Fermer" on:click={() => selected = null}>×</button>
+  <p class="eyebrow">{selected.status === 'analyse' ? 'RÊVE VALIDÉ' : selected.status.replaceAll('_', ' ').toUpperCase()}</p>
+  <h2>{selected.analysis?.title || formatDate(selected.date)}</h2>
+  <p class="dream-meta">{formatDate(selected.date)} · {getCategory(selected.categoryId)?.name}{selected.isPrivate ? ' · Privé' : ''}</p>
+  <div class="dream-tabs" aria-label="Vue du rêve">
+    <button type="button" class:chosen={dreamTab === 'dream'} aria-pressed={dreamTab === 'dream'} on:click={() => dreamTab = 'dream'}>Le rêve</button>
+    <button type="button" class:chosen={dreamTab === 'analysis'} aria-pressed={dreamTab === 'analysis'} on:click={() => dreamTab = 'analysis'}>Analyse</button>
+  </div>
+  {#if dreamTab === 'dream'}
+    <div class="reading-heading"><span>VOTRE RÉCIT</span><button class="raw-toggle" type="button" on:click={() => editingDreamText = !editingDreamText}>{editingDreamText ? 'Terminer' : 'Modifier le texte'}</button></div>
+    {#if editingDreamText}
+      <textarea class="dream-text" aria-label="Texte du rêve" bind:value={selected.cleanedText} placeholder="Votre rêve…"></textarea>
+    {:else if selected.cleanedText.trim()}
+      <article class="dream-reading">{selected.cleanedText}</article>
+    {:else}
+      <p class="dream-reading dream-reading-empty">{selected.captureMode === 'vocal' ? 'Votre récit apparaîtra ici après la transcription.' : 'Votre récit est vide.'}</p>
+    {/if}
+    {#if selected.captureMode === 'vocal' && selected.rawText}<button class="raw-toggle" on:click={() => showRaw = !showRaw}>{showRaw ? 'Masquer' : 'Voir'} la transcription brute</button>{#if showRaw}<blockquote>{selected.rawText}</blockquote>{/if}{/if}
+  {:else}
+    <div class="form-grid"><label>Date<input type="date" bind:value={selected.date} /></label><label>Catégorie<select bind:value={selected.categoryId}>{#each categories as category}<option value={category.id}>{category.name}</option>{/each}</select></label></div>
+    <label class="private-toggle"><input type="checkbox" checked={selected.isPrivate} on:change={(event) => { const value = event.currentTarget.checked; event.currentTarget.checked = selected!.isPrivate; makePrivate('selected', value); }} /> Rêve privé</label>
+    {#if selected.error}<p class="error">{selected.error}</p>{/if}
+    {#if selected.status !== 'analyse' || selected.analysisStale}<p class="privacy-note">Pour l’analyse, les libellés existants de vos rêves publics sont envoyés au service IA. Pour un rêve privé déverrouillé, ceux des rêves privés le sont aussi.</p><button class="primary" disabled={loading} on:click={async () => { if (selected) { const dreamId = selected.id; await saveSelected(false); await processDream(dreamId); } }}>{loading ? 'Analyse en cours…' : selected.analysisStale ? 'Ré-analyser le texte' : 'Lancer l’analyse'}</button>{/if}
+    {#if selected.analysis}<section class="analysis"><div class="analysis-head"><h3>{selected.status === 'analyse' ? 'Analyse du rêve' : 'Analyse à valider'}</h3><span class="grade">{selected.analysis.detailLevel}/5</span></div><label>Titre du rêve<input bind:value={selected.analysis.title} maxlength="100" placeholder="Un titre court" /></label><p class="muted">{detailLabels[selected.analysis.detailLevel - 1]}</p><TagEditor label="Personnages" bind:values={editorLists.characters} suggestions={existingLabels.characters} /><TagEditor label="Lieux" bind:values={editorLists.places} suggestions={existingLabels.places} /><TagEditor label="Thèmes" bind:values={editorLists.themes} suggestions={existingLabels.themes} /><TagEditor label="Mots-clés" bind:values={editorLists.keywords} suggestions={existingLabels.keywords} max={5} /><TagEditor label="Émotions" bind:values={editorLists.feelings} suggestions={existingLabels.feelings} /><label>Niveau de détail<select bind:value={selected.analysis.detailLevel}>{#each [1,2,3,4,5] as level}<option value={level}>{level}/5 — {detailLabels[level - 1]}</option>{/each}</select></label></section>{:else}<p class="muted analysis-empty">L’analyse de votre rêve apparaîtra ici.</p>{/if}
+  {/if}
+  <div class="editor-actions"><button class="secondary" on:click={() => saveSelected(false)}>Enregistrer</button>{#if dreamTab === 'analysis' && selected.analysis}<button class="primary" on:click={() => saveSelected(true)}>Valider l’analyse</button>{/if}</div>
+  {#if dreamTab === 'analysis'}<button class="danger" on:click={trashSelected}>Placer dans la corbeille</button>{/if}</section></div>{/if}
 
 {#if pinDialog}<div class="overlay pin-overlay"><section class="modal pin"><button class="close" disabled={pinBusy} aria-label="Annuler le PIN" on:click={() => { pinDialog = false; pinAction = null; }}>×</button><p class="eyebrow">CONFIDENTIALITÉ</p><h2>{pinPurpose === 'create' ? 'Créer votre PIN' : pinPurpose === 'change' ? 'Modifier votre PIN' : 'Déverrouiller les rêves privés'}</h2><p>{pinPurpose === 'create' ? 'Choisissez un PIN secret à six chiffres pour vos rêves privés.' : pinPurpose === 'change' ? 'Saisissez votre PIN actuel, puis choisissez le nouveau.' : 'Saisissez votre PIN pour consulter vos rêves privés.'}</p>
   {#if pinPurpose !== 'create'}<label>{pinPurpose === 'change' ? 'PIN actuel' : 'PIN'}<input type="password" inputmode="numeric" maxlength="6" pattern="[0-9]*" bind:value={pinValue} placeholder="••••••" aria-label="PIN actuel" /></label>{/if}

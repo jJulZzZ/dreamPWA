@@ -33,3 +33,13 @@ button.day.selected-day { outline: 1px solid #bdaaff; outline-offset: -1px; back
 .tag-options button:hover,.tag-custom:hover { background:rgba(189,155,255,.16); }
 .tag-options p { margin:8px; color:#aaa1b9; font-size:13px; }
 .tag-custom { color:#cbb7ff; border-top:1px solid rgba(255,255,255,.1); border-radius:0; }
+.dream-meta { color:#a99fb5; font-size:13px; margin:-10px 0 22px; text-transform:capitalize; }
+.dream-tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:4px; margin-bottom:26px; border-radius:13px; background:rgba(255,255,255,.06); }
+.dream-tabs button { padding:11px; border:0; border-radius:10px; color:#b8b0c6; background:transparent; }
+.dream-tabs button.chosen { color:#fff; background:rgba(189,155,255,.28); }
+.reading-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; color:#a78bfa; font:11px/1.1 "DM Mono",monospace; letter-spacing:.13em; }
+.reading-heading button { font-family:Outfit,system-ui,sans-serif; letter-spacing:normal; }
+.dream-reading { margin:16px 0 24px; padding:24px 20px; border:1px solid rgba(211,190,255,.13); border-radius:18px; background:rgba(255,255,255,.035); color:#eee9f5; font-size:17px; line-height:1.8; white-space:pre-wrap; overflow-wrap:anywhere; }
+.dream-reading-empty { color:#a99fb5; font-size:15px; }
+.analysis-empty { margin:22px 0; }
+.editor-actions:has(> :only-child) { grid-template-columns:1fr; }
