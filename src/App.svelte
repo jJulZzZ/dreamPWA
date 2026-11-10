@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import TagEditor from './TagEditor.svelte';
+  import LatticeLoader from './LatticeLoader.svelte';
   import PlasmaBackground from './PlasmaBackground.svelte';
   import { collectLabels } from './lib/labels';
   import { db, initialiseDatabase } from './lib/db';
@@ -311,7 +312,7 @@
     <div class="form-grid"><label>Date<input type="date" bind:value={selected.date} /></label><label>Catégorie<select bind:value={selected.categoryId}>{#each categories as category}<option value={category.id}>{category.name}</option>{/each}</select></label></div>
     <label class="private-toggle"><input type="checkbox" checked={selected.isPrivate} on:change={(event) => { const value = event.currentTarget.checked; event.currentTarget.checked = selected!.isPrivate; makePrivate('selected', value); }} /> Rêve privé</label>
     {#if selected.error}<p class="error">{selected.error}</p>{/if}
-    {#if selected.status !== 'analyse' || selected.analysisStale}<p class="privacy-note">Pour l’analyse, les libellés existants de vos rêves publics sont envoyés au service IA. Pour un rêve privé déverrouillé, ceux des rêves privés le sont aussi.</p><button class="primary" disabled={loading} on:click={async () => { if (selected) { const dreamId = selected.id; await saveSelected(false); await processDream(dreamId); } }}>{loading ? 'Analyse en cours…' : selected.analysisStale ? 'Ré-analyser le texte' : 'Lancer l’analyse'}</button>{/if}
+    {#if selected.status !== 'analyse' || selected.analysisStale}<p class="privacy-note">Pour l’analyse, les libellés existants de vos rêves publics sont envoyés au service IA. Pour un rêve privé déverrouillé, ceux des rêves privés le sont aussi.</p><button class="primary" disabled={loading} on:click={async () => { if (selected) { const dreamId = selected.id; await saveSelected(false); await processDream(dreamId); } }}>{loading ? 'Analyse en cours…' : selected.analysisStale ? 'Ré-analyser le texte' : 'Lancer l’analyse'}</button>{#if loading}<LatticeLoader />{/if}{/if}
     {#if selected.analysis}<section class="analysis"><div class="analysis-head"><h3>{selected.status === 'analyse' ? 'Analyse du rêve' : 'Analyse à valider'}</h3><span class="grade">{selected.analysis.detailLevel}/5</span></div><label>Titre du rêve<input bind:value={selected.analysis.title} maxlength="100" placeholder="Un titre court" /></label><p class="muted">{detailLabels[selected.analysis.detailLevel - 1]}</p><TagEditor label="Personnages" bind:values={editorLists.characters} suggestions={existingLabels.characters} /><TagEditor label="Lieux" bind:values={editorLists.places} suggestions={existingLabels.places} /><TagEditor label="Thèmes" bind:values={editorLists.themes} suggestions={existingLabels.themes} /><TagEditor label="Mots-clés" bind:values={editorLists.keywords} suggestions={existingLabels.keywords} max={5} /><TagEditor label="Émotions" bind:values={editorLists.feelings} suggestions={existingLabels.feelings} /><label>Niveau de détail<select bind:value={selected.analysis.detailLevel}>{#each [1,2,3,4,5] as level}<option value={level}>{level}/5 — {detailLabels[level - 1]}</option>{/each}</select></label></section>{:else}<p class="muted analysis-empty">L’analyse de votre rêve apparaîtra ici.</p>{/if}
   {/if}
   <div class="editor-actions"><button class="secondary" on:click={() => saveSelected(false)}>Enregistrer</button>{#if dreamTab === 'analysis' && selected.analysis}<button class="primary" on:click={() => saveSelected(true)}>Valider l’analyse</button>{/if}</div>
@@ -322,4 +323,6 @@
   {#if pinPurpose !== 'unlock'}<label>Nouveau PIN<input type="password" inputmode="numeric" maxlength="6" pattern="[0-9]*" bind:value={newPinValue} placeholder="••••••" aria-label="Nouveau PIN" /></label><label>Confirmer le nouveau PIN<input type="password" inputmode="numeric" maxlength="6" pattern="[0-9]*" bind:value={confirmPinValue} placeholder="••••••" aria-label="Confirmer le nouveau PIN" /></label>{/if}
   <button class="primary" disabled={pinBusy} on:click={submitPin}>{pinBusy ? 'Enregistrement…' : pinPurpose === 'create' ? 'Créer le PIN' : pinPurpose === 'change' ? 'Enregistrer le nouveau PIN' : 'Déverrouiller'}</button>{#if settings.pinHash}<button class="danger" disabled={pinBusy || loading} on:click={resetPin}>PIN oublié ? Réinitialiser</button>{/if}
 </section></div>{/if}
+
+
 
