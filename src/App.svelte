@@ -235,6 +235,7 @@
   }
   function dateKey(day: Date) { return day.toLocaleDateString('en-CA'); }
   function moveMonth(delta: number) { month = new Date(month.getFullYear(), month.getMonth() + delta, 1); daySelected = dateKey(month); }
+  function goToToday() { const current = new Date(); month = new Date(current.getFullYear(), current.getMonth(), 1); daySelected = dateKey(current); }
 </script>
 
 <svelte:head><meta name="description" content="Journal de rêves français, privé et disponible hors ligne." /></svelte:head>
@@ -256,6 +257,7 @@
   {:else if tab === 'calendrier'}
     <section class="page-title"><p class="eyebrow">VOS NUITS</p><h2>Calendrier</h2></section>
     <div class="month-nav"><button aria-label="Mois précédent" on:click={() => moveMonth(-1)}>‹</button><strong>{new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(month)}</strong><button aria-label="Mois suivant" on:click={() => moveMonth(1)}>›</button></div>
+    <div class="calendar-today"><button class="secondary" type="button" on:click={goToToday}>Aujourd’hui</button></div>
     <div class="weekdays">{#each ['L','M','M','J','V','S','D'] as label}<span>{label}</span>{/each}</div>
     <div class="calendar">{#each daysInCalendar(month) as day}{#if day}<button class="day" class:selected-day={daySelected === dateKey(day)} aria-pressed={daySelected === dateKey(day)} aria-label={`Voir les rêves du ${formatDate(dateKey(day))}`} on:click={() => daySelected = dateKey(day)}><span>{day.getDate()}</span>{#each visibleDreams.filter((dream) => dream.date === dateKey(day)) as dream}<span class="calendar-dream" style={`background:${dreamColor(dream, categories)}`} title={needsProcessing(dream) ? 'À traiter' : getCategory(dream.categoryId)?.name}>{dream.isPrivate && !unlocked ? '⌁' : '✦'}</span>{/each}</button>{:else}<div class="day blank"></div>{/if}{/each}</div>
     <p class="muted">Rouge : à traiter · Une case par rêve</p>
