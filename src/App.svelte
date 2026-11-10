@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import TagEditor from './TagEditor.svelte';
+  import PlasmaBackground from './PlasmaBackground.svelte';
   import { collectLabels } from './lib/labels';
   import { db, initialiseDatabase } from './lib/db';
   import { cleanText, extract, transcribe } from './lib/ai';
@@ -238,6 +239,7 @@
 <svelte:head><meta name="description" content="Journal de rêves français, privé et disponible hors ligne." /></svelte:head>
 
 <main>
+  <PlasmaBackground />
   <header class="topbar"><div><p class="eyebrow">JOURNAL ONIRIQUE</p><h1>Rêveil</h1></div><button class="icon-button" aria-label="Réglages" on:click={() => tab = 'reglages'}>☼</button></header>
   {#if notice}<div class="toast">{notice}</div>{/if}
 
@@ -320,3 +322,4 @@
   {#if pinPurpose !== 'unlock'}<label>Nouveau PIN<input type="password" inputmode="numeric" maxlength="6" pattern="[0-9]*" bind:value={newPinValue} placeholder="••••••" aria-label="Nouveau PIN" /></label><label>Confirmer le nouveau PIN<input type="password" inputmode="numeric" maxlength="6" pattern="[0-9]*" bind:value={confirmPinValue} placeholder="••••••" aria-label="Confirmer le nouveau PIN" /></label>{/if}
   <button class="primary" disabled={pinBusy} on:click={submitPin}>{pinBusy ? 'Enregistrement…' : pinPurpose === 'create' ? 'Créer le PIN' : pinPurpose === 'change' ? 'Enregistrer le nouveau PIN' : 'Déverrouiller'}</button>{#if settings.pinHash}<button class="danger" disabled={pinBusy || loading} on:click={resetPin}>PIN oublié ? Réinitialiser</button>{/if}
 </section></div>{/if}
+
