@@ -1,4 +1,4 @@
-import { assertPost, failure, json } from './_client';
+import { assertPost, failure, json } from './_client.ts';
 import { transcribeAudio } from '../../server/ai.ts';
 
 export const config = { maxDuration: 30 };

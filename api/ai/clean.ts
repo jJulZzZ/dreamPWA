@@ -1,4 +1,4 @@
-import { assertPost, failure, json } from './_client';
+import { assertPost, failure, json } from './_client.ts';
 import { cleanDreamText } from '../../server/ai.ts';
 
 export default { async fetch(request: Request) {

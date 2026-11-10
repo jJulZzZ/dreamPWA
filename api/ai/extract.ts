@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { extractDream } from '../../server/ai.ts';
-import { assertPost, failure, json } from './_client';
+import { assertPost, failure, json } from './_client.ts';
 
 export default { async fetch(request: Request) {
   const rejected = assertPost(request);
