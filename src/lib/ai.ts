@@ -1,5 +1,6 @@
 import { analysisSchema } from './schema';
 import type { DreamAnalysis } from './types';
+import type { AnalysisLabels } from './labels';
 
 async function request<T>(url: string, init: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -22,9 +23,9 @@ export async function cleanText(text: string) {
   return response.cleanedText;
 }
 
-export async function extract(text: string, profile: string): Promise<DreamAnalysis> {
+export async function extract(text: string, profile: string, labels: AnalysisLabels): Promise<DreamAnalysis> {
   const response = await request<{ analysis: unknown }>('/api/ai/extract', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, profile })
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, profile, labels })
   });
   return analysisSchema.parse(response.analysis);
 }

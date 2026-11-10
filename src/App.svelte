@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import TagEditor from './TagEditor.svelte';
+  import { collectLabels } from './lib/labels';
   import { db, initialiseDatabase } from './lib/db';
   import { cleanText, extract, transcribe } from './lib/ai';
   import { makeStats } from './lib/stats';
@@ -46,6 +47,7 @@
   let showRaw = false;
   let editorLists: Pick<DreamAnalysis, 'characters' | 'places' | 'themes' | 'keywords' | 'feelings'> = { characters: [], places: [], themes: [], keywords: [], feelings: [] };
 
+  $: existingLabels = collectLabels(dreams, Boolean(selected?.isPrivate && unlocked));
   $: visibleDreams = dreams.filter((dream) => !dream.deletedAt);
   $: accessibleDreams = visibleDreams.filter((dream) => !dream.isPrivate || unlocked);
   $: pendingDreams = visibleDreams.filter(needsProcessing);
@@ -132,7 +134,7 @@
       }
       dream = (await db.dreams.get(dream.id))!;
       if (dream.status === 'a_analyser' || dream.analysisStale || dream.status === 'erreur') {
-        dream.analysis = cleanAnalysis(await extract(dream.cleanedText, settings.profile));
+        dream.analysis = cleanAnalysis(await extract(dream.cleanedText, settings.profile, collectLabels(dreams, dream.isPrivate && unlocked)));
         dream.status = 'a_valider'; dream.analysisStale = false; dream.error = undefined; dream.retryStatus = undefined;
         await db.dreams.put({ ...dream, updatedAt: now() });
       }
@@ -287,8 +289,9 @@
   {#if selected.captureMode === 'vocal' && selected.rawText}<button class="raw-toggle" on:click={() => showRaw = !showRaw}>{showRaw ? 'Masquer' : 'Voir'} la transcription brute</button>{#if showRaw}<blockquote>{selected.rawText}</blockquote>{/if}{/if}
   <textarea class="dream-text" bind:value={selected.cleanedText} placeholder="Votre rêve…"></textarea>
   {#if selected.error}<p class="error">{selected.error}</p>{/if}
+  <p class="privacy-note">Pour l’analyse, les libellés existants de vos rêves publics sont envoyés au service IA. Pour un rêve privé déverrouillé, ceux des rêves privés le sont aussi.</p>
   {#if selected.status !== 'analyse' || selected.analysisStale}<button class="primary" disabled={loading} on:click={() => processDream(selected!.id)}>{loading ? 'Analyse en cours…' : selected.analysisStale ? 'Ré-analyser le texte' : 'Lancer l’analyse'}</button>{/if}
-  {#if selected.analysis}<section class="analysis"><div class="analysis-head"><h3>Analyse à valider</h3><span class="grade">{selected.analysis.detailLevel}/5</span></div><label>Titre du rêve<input bind:value={selected.analysis.title} maxlength="100" placeholder="Un titre court" /></label><p class="muted">{detailLabels[selected.analysis.detailLevel - 1]}</p><TagEditor label="Personnages" bind:values={editorLists.characters} /><TagEditor label="Lieux" bind:values={editorLists.places} /><TagEditor label="Thèmes" bind:values={editorLists.themes} /><TagEditor label="Mots-clés" bind:values={editorLists.keywords} max={5} /><TagEditor label="Émotions" bind:values={editorLists.feelings} /><label>Niveau de détail<select bind:value={selected.analysis.detailLevel}>{#each [1,2,3,4,5] as level}<option value={level}>{level}/5 — {detailLabels[level - 1]}</option>{/each}</select></label></section>{/if}
+  {#if selected.analysis}<section class="analysis"><div class="analysis-head"><h3>Analyse à valider</h3><span class="grade">{selected.analysis.detailLevel}/5</span></div><label>Titre du rêve<input bind:value={selected.analysis.title} maxlength="100" placeholder="Un titre court" /></label><p class="muted">{detailLabels[selected.analysis.detailLevel - 1]}</p><TagEditor label="Personnages" bind:values={editorLists.characters} suggestions={existingLabels.characters} /><TagEditor label="Lieux" bind:values={editorLists.places} suggestions={existingLabels.places} /><TagEditor label="Thèmes" bind:values={editorLists.themes} suggestions={existingLabels.themes} /><TagEditor label="Mots-clés" bind:values={editorLists.keywords} suggestions={existingLabels.keywords} max={5} /><TagEditor label="Émotions" bind:values={editorLists.feelings} suggestions={existingLabels.feelings} /><label>Niveau de détail<select bind:value={selected.analysis.detailLevel}>{#each [1,2,3,4,5] as level}<option value={level}>{level}/5 — {detailLabels[level - 1]}</option>{/each}</select></label></section>{/if}
   <div class="editor-actions"><button class="secondary" on:click={() => saveSelected(false)}>Enregistrer</button>{#if selected.analysis}<button class="primary" on:click={() => saveSelected(true)}>Valider l’analyse</button>{/if}</div><button class="danger" on:click={trashSelected}>Placer dans la corbeille</button></section></div>{/if}
 
 {#if pinDialog}<div class="overlay pin-overlay"><section class="modal pin"><button class="close" disabled={pinBusy} aria-label="Annuler le PIN" on:click={() => { pinDialog = false; pinAction = null; }}>×</button><p class="eyebrow">CONFIDENTIALITÉ</p><h2>{pinPurpose === 'create' ? 'Créer votre PIN' : pinPurpose === 'change' ? 'Modifier votre PIN' : 'Déverrouiller les rêves privés'}</h2><p>{pinPurpose === 'create' ? 'Choisissez un PIN secret à six chiffres pour vos rêves privés.' : pinPurpose === 'change' ? 'Saisissez votre PIN actuel, puis choisissez le nouveau.' : 'Saisissez votre PIN pour consulter vos rêves privés.'}</p>

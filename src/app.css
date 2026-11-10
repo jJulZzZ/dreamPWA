@@ -26,3 +26,10 @@ button.day.selected-day { outline: 1px solid #bdaaff; outline-offset: -1px; back
 .tag-add { width:36px; min-height:36px; border:1px dashed rgba(211,190,255,.5); border-radius:10px; background:transparent; color:#d8c9ff; font-size:21px; }
 .tag-add:disabled { opacity:.35; cursor:not-allowed; }
 .tag-add:focus-visible,.tag-remove:focus-visible { outline:2px solid #ae90ff; outline-offset:2px; }
+.tag-picker { margin-top:8px; padding:9px; border:1px solid rgba(211,190,255,.22); border-radius:12px; background:#211a2d; }
+.analysis .tag-picker input { margin:0 0 6px; font-size:14px; }
+.tag-options { max-height:180px; overflow-y:auto; }
+.tag-options button,.tag-custom { display:block; width:100%; text-align:left; padding:9px; border:0; border-radius:8px; color:#eee8fa; background:transparent; font-size:14px; }
+.tag-options button:hover,.tag-custom:hover { background:rgba(189,155,255,.16); }
+.tag-options p { margin:8px; color:#aaa1b9; font-size:13px; }
+.tag-custom { color:#cbb7ff; border-top:1px solid rgba(255,255,255,.1); border-radius:0; }
