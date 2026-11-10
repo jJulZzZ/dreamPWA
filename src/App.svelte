@@ -228,7 +228,7 @@
     await db.categories.add({ id: id(), name, color }); await refresh();
   }
   async function restore(dream: Dream) { await db.dreams.update(dream.id, { deletedAt: undefined, updatedAt: now() }); await refresh(); }
-  function daysInCalendar() {
+  function daysInCalendar(month: Date) {
     const first = new Date(month.getFullYear(), month.getMonth(), 1); const offset = (first.getDay() + 6) % 7;
     const total = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
     return Array.from({ length: offset + total }, (_, i) => i < offset ? null : new Date(month.getFullYear(), month.getMonth(), i - offset + 1));
@@ -257,7 +257,7 @@
     <section class="page-title"><p class="eyebrow">VOS NUITS</p><h2>Calendrier</h2></section>
     <div class="month-nav"><button aria-label="Mois précédent" on:click={() => moveMonth(-1)}>‹</button><strong>{new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(month)}</strong><button aria-label="Mois suivant" on:click={() => moveMonth(1)}>›</button></div>
     <div class="weekdays">{#each ['L','M','M','J','V','S','D'] as label}<span>{label}</span>{/each}</div>
-    <div class="calendar">{#each daysInCalendar() as day}{#if day}<button class="day" class:selected-day={daySelected === dateKey(day)} aria-pressed={daySelected === dateKey(day)} aria-label={`Voir les rêves du ${formatDate(dateKey(day))}`} on:click={() => daySelected = dateKey(day)}><span>{day.getDate()}</span>{#each visibleDreams.filter((dream) => dream.date === dateKey(day)) as dream}<span class="calendar-dream" style={`background:${dreamColor(dream, categories)}`} title={needsProcessing(dream) ? 'À traiter' : getCategory(dream.categoryId)?.name}>{dream.isPrivate && !unlocked ? '⌁' : '✦'}</span>{/each}</button>{:else}<div class="day blank"></div>{/if}{/each}</div>
+    <div class="calendar">{#each daysInCalendar(month) as day}{#if day}<button class="day" class:selected-day={daySelected === dateKey(day)} aria-pressed={daySelected === dateKey(day)} aria-label={`Voir les rêves du ${formatDate(dateKey(day))}`} on:click={() => daySelected = dateKey(day)}><span>{day.getDate()}</span>{#each visibleDreams.filter((dream) => dream.date === dateKey(day)) as dream}<span class="calendar-dream" style={`background:${dreamColor(dream, categories)}`} title={needsProcessing(dream) ? 'À traiter' : getCategory(dream.categoryId)?.name}>{dream.isPrivate && !unlocked ? '⌁' : '✦'}</span>{/each}</button>{:else}<div class="day blank"></div>{/if}{/each}</div>
     <p class="muted">Rouge : à traiter · Une case par rêve</p>
     <section class="section"><div class="section-heading"><h3>{formatDate(daySelected)}</h3><span>{dayDreams.length} rêve(s)</span></div>
       {#each dayDreams as dream}<button class="dream-card" class:pending={needsProcessing(dream)} on:click={() => openDream(dream)}><span class="dot" style={`background:${dreamColor(dream, categories)}`}></span><span><strong>{dreamTitle(dream, unlocked)}</strong><small>{needsProcessing(dream) ? 'À traiter' : getCategory(dream.categoryId)?.name}{dream.isPrivate ? ' · Privé' : ''}</small></span><b>›</b></button>{:else}<p class="empty">Aucun rêve enregistré ce jour-là.</p>{/each}
