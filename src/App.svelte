@@ -163,7 +163,7 @@
     selected = structuredClone(update); await refresh(); message(validate ? 'Rêve validé. L’audio temporaire a été supprimé.' : 'Modifications enregistrées.');
   }
   async function trashSelected() {
-    if (!selected || !confirm('Placer ce rêve dans la corbeille pendant 30 jours ?')) return;
+    if (!selected || !confirm('Supprimer ce rêve ? Il restera dans la corbeille pendant 30 jours et pourra être restauré depuis les réglages.')) return;
     await db.dreams.update(selected.id, { deletedAt: now(), updatedAt: now() }); selected = null; await refresh(); message('Rêve déplacé dans la corbeille.');
   }
   function matchesSearch(dream: Dream) {
@@ -316,7 +316,7 @@
     {#if selected.analysis}<section class="analysis"><div class="analysis-head"><h3>{selected.status === 'analyse' ? 'Analyse du rêve' : 'Analyse à valider'}</h3><span class="grade">{selected.analysis.detailLevel}/5</span></div><label>Titre du rêve<input bind:value={selected.analysis.title} maxlength="100" placeholder="Un titre court" /></label><p class="muted">{detailLabels[selected.analysis.detailLevel - 1]}</p><TagEditor label="Personnages" bind:values={editorLists.characters} suggestions={existingLabels.characters} /><TagEditor label="Lieux" bind:values={editorLists.places} suggestions={existingLabels.places} /><TagEditor label="Thèmes" bind:values={editorLists.themes} suggestions={existingLabels.themes} /><TagEditor label="Mots-clés" bind:values={editorLists.keywords} suggestions={existingLabels.keywords} max={5} /><TagEditor label="Émotions" bind:values={editorLists.feelings} suggestions={existingLabels.feelings} /><label>Niveau de détail<select bind:value={selected.analysis.detailLevel}>{#each [1,2,3,4,5] as level}<option value={level}>{level}/5 — {detailLabels[level - 1]}</option>{/each}</select></label></section>{:else}<p class="muted analysis-empty">L’analyse de votre rêve apparaîtra ici.</p>{/if}
   {/if}
   <div class="editor-actions"><button class="secondary" on:click={() => saveSelected(false)}>Enregistrer</button>{#if dreamTab === 'analysis' && selected.analysis}<button class="primary" on:click={() => saveSelected(true)}>Valider l’analyse</button>{/if}</div>
-  {#if dreamTab === 'analysis'}<button class="danger" on:click={trashSelected}>Placer dans la corbeille</button>{/if}</section></div>{/if}
+  <button class="danger" on:click={trashSelected}>Supprimer ce rêve</button></section></div>{/if}
 
 {#if pinDialog}<div class="overlay pin-overlay"><section class="modal pin"><button class="close" disabled={pinBusy} aria-label="Annuler le PIN" on:click={() => { pinDialog = false; pinAction = null; }}>×</button><p class="eyebrow">CONFIDENTIALITÉ</p><h2>{pinPurpose === 'create' ? 'Créer votre PIN' : pinPurpose === 'change' ? 'Modifier votre PIN' : 'Déverrouiller les rêves privés'}</h2><p>{pinPurpose === 'create' ? 'Choisissez un PIN secret à six chiffres pour vos rêves privés.' : pinPurpose === 'change' ? 'Saisissez votre PIN actuel, puis choisissez le nouveau.' : 'Saisissez votre PIN pour consulter vos rêves privés.'}</p>
   {#if pinPurpose !== 'create'}<label>{pinPurpose === 'change' ? 'PIN actuel' : 'PIN'}<input type="password" inputmode="numeric" maxlength="6" pattern="[0-9]*" bind:value={pinValue} placeholder="••••••" aria-label="PIN actuel" /></label>{/if}

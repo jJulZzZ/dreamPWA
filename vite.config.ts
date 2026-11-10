@@ -17,8 +17,12 @@ export default defineConfig({
         background_color: '#000000',
         display: 'standalone',
         lang: 'fr',
+        id: '/',
         start_url: '/',
-        icons: []
+        icons: [
+          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+        ]
       },
       workbox: {
         navigateFallback: '/index.html',
