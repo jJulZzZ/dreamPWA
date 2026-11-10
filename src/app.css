@@ -16,3 +16,13 @@ button.day.selected-day { outline: 1px solid #bdaaff; outline-offset: -1px; back
 .pin-overlay { z-index: 12; }
 .pin label { display: block; color: #bfb4d0; font-size: 13px; }
 @keyframes pulse { 50% { opacity:.28; } } @media (min-width: 700px) { .modal { border-radius:28px; margin:auto; } .overlay { align-items:center; } .editor { max-width:720px; border-radius:28px; margin:auto; } }
+.tag-field { border:0; padding:0; margin:16px 0 0; min-width:0; }
+.tag-field legend { color:#aaa1b9; font-size:12px; margin-bottom:7px; }
+.tag-limit { color:#847b91; }
+.tag-list { display:flex; flex-wrap:wrap; gap:7px; }
+.tag-box { display:flex; align-items:center; min-width:0; max-width:100%; border:1px solid rgba(211,190,255,.25); border-radius:10px; background:rgba(255,255,255,.07); }
+.analysis .tag-box input { width:auto; min-width:4ch; max-width:min(50vw, 220px); margin:0; padding:8px 2px 8px 10px; border:0; border-radius:10px; background:transparent; font-size:13px; }
+.tag-remove { border:0; padding:4px 9px; background:transparent; color:#c4b9d4; font-size:17px; }
+.tag-add { width:36px; min-height:36px; border:1px dashed rgba(211,190,255,.5); border-radius:10px; background:transparent; color:#d8c9ff; font-size:21px; }
+.tag-add:disabled { opacity:.35; cursor:not-allowed; }
+.tag-add:focus-visible,.tag-remove:focus-visible { outline:2px solid #ae90ff; outline-offset:2px; }

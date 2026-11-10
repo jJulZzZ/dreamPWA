@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import TagEditor from './TagEditor.svelte';
   import { db, initialiseDatabase } from './lib/db';
   import { cleanText, extract, transcribe } from './lib/ai';
   import { makeStats } from './lib/stats';
-  import { cleanAnalysis, detailLabels, formatDate, id, now, today, uniqueLabels } from './lib/utils';
+  import { cleanAnalysis, detailLabels, formatDate, id, now, today } from './lib/utils';
   import { dreamColor, dreamTitle, needsProcessing } from './lib/presentation';
   import { resetPinAndDeletePrivateDreams, savePin, verifyPin } from './lib/privacy';
   import type { BackupFile, Category, Dream, DreamAnalysis, DreamStatus, Settings } from './lib/types';
@@ -43,7 +44,7 @@
   let statsFrom = new Date(new Date().getFullYear(), 0, 1).toLocaleDateString('en-CA');
   let statsTo = today();
   let showRaw = false;
-  let editorLists = { characters: '', places: '', themes: '', keywords: '', feelings: '' };
+  let editorLists: Pick<DreamAnalysis, 'characters' | 'places' | 'themes' | 'keywords' | 'feelings'> = { characters: [], places: [], themes: [], keywords: [], feelings: [] };
 
   $: visibleDreams = dreams.filter((dream) => !dream.deletedAt);
   $: accessibleDreams = visibleDreams.filter((dream) => !dream.isPrivate || unlocked);
@@ -66,7 +67,7 @@
   function getCategory(categoryId: string) { return categories.find((category) => category.id === categoryId) ?? categories[0]; }
   function setEditorLists(analysis?: DreamAnalysis) {
     const a = analysis ?? emptyAnalysis();
-    editorLists = { characters: a.characters.join(', '), places: a.places.join(', '), themes: a.themes.join(', '), keywords: a.keywords.join(', '), feelings: a.feelings.join(', ') };
+    editorLists = { characters: [...a.characters], places: [...a.places], themes: [...a.themes], keywords: [...a.keywords], feelings: [...a.feelings] };
   }
   function openDream(dream: Dream) {
     if (dream.isPrivate && !unlocked) { openPin(settings.pinHash ? 'unlock' : 'create', () => openDream(dream)); return; }
@@ -144,8 +145,7 @@
     } finally { loading = false; }
   }
   function analysisFromEditor(): DreamAnalysis {
-    const split = (value: string, max?: number) => uniqueLabels(value.split(','), max);
-    return cleanAnalysis({ title: selected?.analysis?.title?.trim(), characters: split(editorLists.characters), places: split(editorLists.places), themes: split(editorLists.themes), keywords: split(editorLists.keywords, 5), feelings: split(editorLists.feelings), detailLevel: selected?.analysis?.detailLevel ?? 3, schemaVersion: 1 });
+    return cleanAnalysis({ title: selected?.analysis?.title?.trim(), ...editorLists, detailLevel: selected?.analysis?.detailLevel ?? 3, schemaVersion: 1 });
   }
   async function saveSelected(validate = false) {
     if (!selected) return;
@@ -288,7 +288,7 @@
   <textarea class="dream-text" bind:value={selected.cleanedText} placeholder="Votre rêve…"></textarea>
   {#if selected.error}<p class="error">{selected.error}</p>{/if}
   {#if selected.status !== 'analyse' || selected.analysisStale}<button class="primary" disabled={loading} on:click={() => processDream(selected!.id)}>{loading ? 'Analyse en cours…' : selected.analysisStale ? 'Ré-analyser le texte' : 'Lancer l’analyse'}</button>{/if}
-  {#if selected.analysis}<section class="analysis"><div class="analysis-head"><h3>Analyse à valider</h3><span class="grade">{selected.analysis.detailLevel}/5</span></div><label>Titre du rêve<input bind:value={selected.analysis.title} maxlength="100" placeholder="Un titre court" /></label><p class="muted">{detailLabels[selected.analysis.detailLevel - 1]}</p>{#each [['characters','Personnages'],['places','Lieux'],['themes','Thèmes'],['keywords','Mots-clés'],['feelings','Émotions']] as item}<label>{item[1]}<input bind:value={editorLists[item[0] as keyof typeof editorLists]} placeholder="Séparez par des virgules" /></label>{/each}<label>Niveau de détail<select bind:value={selected.analysis.detailLevel}>{#each [1,2,3,4,5] as level}<option value={level}>{level}/5 — {detailLabels[level - 1]}</option>{/each}</select></label></section>{/if}
+  {#if selected.analysis}<section class="analysis"><div class="analysis-head"><h3>Analyse à valider</h3><span class="grade">{selected.analysis.detailLevel}/5</span></div><label>Titre du rêve<input bind:value={selected.analysis.title} maxlength="100" placeholder="Un titre court" /></label><p class="muted">{detailLabels[selected.analysis.detailLevel - 1]}</p><TagEditor label="Personnages" bind:values={editorLists.characters} /><TagEditor label="Lieux" bind:values={editorLists.places} /><TagEditor label="Thèmes" bind:values={editorLists.themes} /><TagEditor label="Mots-clés" bind:values={editorLists.keywords} max={5} /><TagEditor label="Émotions" bind:values={editorLists.feelings} /><label>Niveau de détail<select bind:value={selected.analysis.detailLevel}>{#each [1,2,3,4,5] as level}<option value={level}>{level}/5 — {detailLabels[level - 1]}</option>{/each}</select></label></section>{/if}
   <div class="editor-actions"><button class="secondary" on:click={() => saveSelected(false)}>Enregistrer</button>{#if selected.analysis}<button class="primary" on:click={() => saveSelected(true)}>Valider l’analyse</button>{/if}</div><button class="danger" on:click={trashSelected}>Placer dans la corbeille</button></section></div>{/if}
 
 {#if pinDialog}<div class="overlay pin-overlay"><section class="modal pin"><button class="close" disabled={pinBusy} aria-label="Annuler le PIN" on:click={() => { pinDialog = false; pinAction = null; }}>×</button><p class="eyebrow">CONFIDENTIALITÉ</p><h2>{pinPurpose === 'create' ? 'Créer votre PIN' : pinPurpose === 'change' ? 'Modifier votre PIN' : 'Déverrouiller les rêves privés'}</h2><p>{pinPurpose === 'create' ? 'Choisissez un PIN secret à six chiffres pour vos rêves privés.' : pinPurpose === 'change' ? 'Saisissez votre PIN actuel, puis choisissez le nouveau.' : 'Saisissez votre PIN pour consulter vos rêves privés.'}</p>
