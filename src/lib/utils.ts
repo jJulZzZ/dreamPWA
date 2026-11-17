@@ -36,7 +36,20 @@ export async function hashPin(pin: string, salt: string) {
 }
 
 export function formatDate(value: string) {
-  return new Intl.DateTimeFormat('fr-FR', { dateStyle: 'long' }).format(new Date(`${value}T12:00:00`));
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : value;
+}
+
+export function parseFrenchDate(value: string): string | null {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value);
+  if (!match) return null;
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  if (year < 1000 || month < 1 || month > 12 || day < 1) return null;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  if (day > daysInMonth) return null;
+  return `${match[3]}-${match[2]}-${match[1]}`;
 }
 
 export const detailLabels = ['Fragments vagues', 'Bribe de rêve', 'Récit cohérent', 'Récit riche', 'Très descriptif'];

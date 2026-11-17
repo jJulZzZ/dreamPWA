@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import TagEditor from './TagEditor.svelte';
+  import DateInput from './DateInput.svelte';
   import LatticeLoader from './LatticeLoader.svelte';
   import PlasmaBackground from './PlasmaBackground.svelte';
   import { collectLabels } from './lib/labels';
@@ -23,6 +24,7 @@
   let importingLegacy = false;
   let draftText = '';
   let draftDate = today();
+  let draftDateValid = true;
   let draftCategory = 'normal';
   let draftPrivate = false;
   let voiceBlob: Blob | null = null;
@@ -46,11 +48,18 @@
   let month = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   let statsFrom = new Date(new Date().getFullYear(), 0, 1).toLocaleDateString('en-CA');
   let statsTo = today();
+  let statsFromValid = true;
+  let statsToValid = true;
+  let selectedDateValid = true;
   let showRaw = false;
   let dreamTab: 'dream' | 'analysis' = 'dream';
   let editingDreamText = false;
+  let savedDreamText = '';
+  let saving = false;
   let editorLists: Pick<DreamAnalysis, 'characters' | 'places' | 'themes' | 'keywords' | 'feelings'> = { characters: [], places: [], themes: [], keywords: [], feelings: [] };
 
+  $: textNeedsReanalysis = Boolean(selected?.analysis && (selected.analysisStale || selected.cleanedText !== savedDreamText));
+  $: canRunAnalysis = Boolean(selected && (textNeedsReanalysis || ['a_transcrire', 'a_nettoyer', 'a_analyser', 'erreur'].includes(selected.status)));
   $: existingLabels = collectLabels(dreams, Boolean(selected?.isPrivate && unlocked));
   $: visibleDreams = dreams.filter((dream) => !dream.deletedAt);
   $: accessibleDreams = visibleDreams.filter((dream) => !dream.isPrivate || unlocked);
@@ -68,7 +77,7 @@
   }
   function message(text: string) { notice = text; setTimeout(() => { if (notice === text) notice = ''; }, 4200); }
   function openComposer(legacy = false) {
-    importingLegacy = legacy; draftText = ''; draftDate = today(); draftCategory = 'normal'; draftPrivate = false; voiceBlob = null; captureMode = 'texte'; composer = true;
+    importingLegacy = legacy; draftText = ''; draftDate = today(); draftDateValid = true; draftCategory = 'normal'; draftPrivate = false; voiceBlob = null; captureMode = 'texte'; composer = true;
   }
   function getCategory(categoryId: string) { return categories.find((category) => category.id === categoryId) ?? categories[0]; }
   function setEditorLists(analysis?: DreamAnalysis) {
@@ -77,7 +86,7 @@
   }
   function openDream(dream: Dream) {
     if (dream.isPrivate && !unlocked) { openPin(settings.pinHash ? 'unlock' : 'create', () => openDream(dream)); return; }
-    selected = structuredClone(dream); setEditorLists(selected.analysis); showRaw = false; dreamTab = 'dream'; editingDreamText = false;
+    selected = structuredClone(dream); selectedDateValid = true; savedDreamText = dream.cleanedText; setEditorLists(selected.analysis); showRaw = false; dreamTab = 'dream'; editingDreamText = false;
   }
   function openPin(purpose: typeof pinPurpose, action: (() => void | Promise<void>) | null = null) {
     pinPurpose = purpose; pinValue = ''; newPinValue = ''; confirmPinValue = ''; pinAction = action; pinDialog = true;
@@ -88,7 +97,7 @@
     else apply();
   }
   async function saveDraft() {
-    if (recording || microphonePending) return;
+    if (recording || microphonePending || !draftDateValid) return;
     const isVoice = captureMode === 'vocal';
     if (isVoice ? !voiceBlob : !draftText.trim()) return message('Écrivez votre rêve ou enregistrez votre voix.');
     if (draftPrivate && (!settings.pinHash || !unlocked)) { openPin(settings.pinHash ? 'unlock' : 'create', saveDraft); return; }
@@ -142,7 +151,7 @@
         dream.status = 'a_valider'; dream.analysisStale = false; dream.error = undefined; dream.retryStatus = undefined;
         await db.dreams.put({ ...dream, updatedAt: now() });
       }
-      const updated = await db.dreams.get(dream.id); if (updated) { selected = structuredClone(updated); setEditorLists(updated.analysis); }
+      const updated = await db.dreams.get(dream.id); if (updated) { selected = structuredClone(updated); savedDreamText = updated.cleanedText; setEditorLists(updated.analysis); }
       await refresh(); message('Analyse prête : vérifiez-la avant de valider.');
     } catch (error) {
       const messageError = error instanceof Error ? error.message : 'Analyse impossible.';
@@ -153,14 +162,33 @@
   function analysisFromEditor(): DreamAnalysis {
     return cleanAnalysis({ title: selected?.analysis?.title?.trim(), ...editorLists, detailLevel: selected?.analysis?.detailLevel ?? 3, schemaVersion: 1 });
   }
-  async function saveSelected(validate = false) {
-    if (!selected) return;
-    const changedText = selected.cleanedText !== (await db.dreams.get(selected.id))?.cleanedText;
-    const analysis = selected.analysis ? analysisFromEditor() : undefined;
-    const update: Dream = { ...selected, analysis, status: validate ? 'analyse' : selected.status, analysisStale: changedText ? true : selected.analysisStale, updatedAt: now() };
-    await db.dreams.put(update);
-    if (validate) await db.audio.delete(selected.id);
-    selected = structuredClone(update); await refresh(); message(validate ? 'Rêve validé. L’audio temporaire a été supprimé.' : 'Modifications enregistrées.');
+  async function saveSelected(validate = false, close = true): Promise<boolean> {
+    if (!selected || saving || !selectedDateValid) return false;
+    saving = true;
+    try {
+      const stored = await db.dreams.get(selected.id);
+      if (!stored) throw new Error('Ce rêve est introuvable.');
+      const changedText = selected.cleanedText !== stored.cleanedText;
+      const analysisStale = Boolean(selected.analysis && (selected.analysisStale || changedText));
+      if (validate && (!selected.analysis || analysisStale || selected.status !== 'a_valider')) {
+        message('Relancez l’analyse avant de la valider.');
+        return false;
+      }
+      const analysis = selected.analysis ? analysisFromEditor() : undefined;
+      const update: Dream = { ...selected, analysis, status: validate ? 'analyse' : selected.status, analysisStale, updatedAt: now() };
+      await db.transaction('rw', db.dreams, db.audio, async () => {
+        await db.dreams.put(update);
+        if (validate) await db.audio.delete(update.id);
+      });
+      selected = close ? null : structuredClone(update);
+      savedDreamText = update.cleanedText;
+      await refresh();
+      if (close) message(validate ? 'Analyse validée et rêve enregistré localement.' : 'Rêve enregistré localement.');
+      return true;
+    } catch {
+      message('Impossible d’enregistrer le rêve. Réessayez.');
+      return false;
+    } finally { saving = false; }
   }
   async function trashSelected() {
     if (!selected || !confirm('Supprimer ce rêve ? Il restera dans la corbeille pendant 30 jours et pourra être restauré depuis les réglages.')) return;
@@ -243,7 +271,6 @@
 <main>
   <PlasmaBackground />
   <header class="topbar"><div><p class="eyebrow">JOURNAL ONIRIQUE</p><h1>Rêveil</h1></div><button class="icon-button" aria-label="Réglages" on:click={() => tab = 'reglages'}>☼</button></header>
-  {#if notice}<div class="toast">{notice}</div>{/if}
 
   {#if tab === 'accueil'}
     <section class="hero"><p class="eyebrow">{new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}</p><h2>Qu’avez-vous rêvé<br />cette nuit&nbsp;?</h2><p>Gardez la trace de l’étrange avant qu’il ne s’efface.</p><button class="primary capture" on:click={() => openComposer()}>✦ Raconter un rêve</button></section>
@@ -271,7 +298,7 @@
     <section class="section">{#if !unlocked && visibleDreams.some((dream) => dream.isPrivate)}<p class="muted">Les rêves privés verrouillés n’apparaissent pas dans les résultats.</p>{/if}{#each filteredDreams as dream}<button class="dream-card" class:pending={needsProcessing(dream)} on:click={() => openDream(dream)}><span class="dot" style={`background:${dreamColor(dream, categories, unlocked)}`}></span><span><strong>{dreamTitle(dream, unlocked)}</strong><small>{formatDate(dream.date)} · {(dream.analysis?.keywords ?? []).join(', ')}</small></span><b>›</b></button>{:else}<div class="empty">Aucun rêve ne correspond.</div>{/each}</section>
   {:else if tab === 'stats'}
     <section class="page-title"><p class="eyebrow">MOTIFS RÉCURRENTS</p><h2>Statistiques</h2></section>
-    <div class="date-range"><label>Du<input type="date" bind:value={statsFrom} /></label><label>Au<input type="date" bind:value={statsTo} /></label></div>
+    <div class="date-range"><DateInput label="Du" bind:value={statsFrom} bind:valid={statsFromValid} /><DateInput label="Au" bind:value={statsTo} bind:valid={statsToValid} /></div>
     {#if !unlocked && visibleDreams.some((dream) => dream.isPrivate)}<p class="privacy-note">⌁ Les rêves privés verrouillés sont exclus des statistiques.</p>{/if}
     <div class="metrics"><div><strong>{stats.dreamCount}</strong><span>rêves analysés</span></div><div><strong>{stats.averageDetail ? stats.averageDetail.toFixed(1) : '—'}</strong><span>détail moyen / 5</span></div><div><strong>{stats.averageWords ? Math.round(stats.averageWords) : '—'}</strong><span>mots en moyenne</span></div></div>
     {#each [{label:'Personnages',data:stats.characters},{label:'Lieux',data:stats.places},{label:'Thèmes',data:stats.themes},{label:'Émotions',data:stats.feelings},{label:'Associations',data:stats.pairs},{label:'Catégories',data:stats.byCategory}] as block}<section class="stat-block"><h3>{block.label}</h3>{#if block.data.length}{#each block.data.slice(0, 5) as item}<div class="stat-row"><span>{item.label}</span><b>{item.count}</b></div>{/each}{:else}<p class="muted">Pas encore de données.</p>{/if}</section>{/each}
@@ -285,15 +312,17 @@
   {/if}
 </main>
 
+{#if notice}<div class="toast" role="status">{notice}</div>{/if}
+
 <nav><button class:active={tab === 'accueil'} on:click={() => tab = 'accueil'}>⌂<span>Accueil</span></button><button class:active={tab === 'calendrier'} on:click={() => tab = 'calendrier'}>▦<span>Calendrier</span></button><button class:active={tab === 'recherche'} on:click={() => tab = 'recherche'}>⌕<span>Recherche</span></button><button class:active={tab === 'stats'} on:click={() => tab = 'stats'}>◔<span>Stats</span></button></nav>
 
 {#if composer}<div class="overlay"><section class="modal composer"><button class="close" disabled={microphonePending} on:click={() => { if (recording) stopRecording(); composer = false; }}>×</button><p class="eyebrow">{importingLegacy ? 'SOUVENIR ANCIEN' : 'NOUVEAU RÊVE'}</p><h2>{importingLegacy ? 'Importer un rêve' : 'Racontez-le vite'}</h2><div class="mode"><button class:chosen={captureMode === 'texte'} aria-pressed={captureMode === 'texte'} disabled={recording || microphonePending} on:click={() => captureMode = 'texte'}>Écrire</button><button class:chosen={captureMode === 'vocal'} aria-pressed={captureMode === 'vocal'} disabled={recording || microphonePending} on:click={() => captureMode = 'vocal'}>Parler</button></div>
   {#if captureMode === 'texte'}<textarea bind:value={draftText} placeholder="Tout ce dont vous vous souvenez…"></textarea>{:else}<div class="recording-box"><span class:recording>●</span><strong>{recording ? 'Enregistrement en cours…' : voiceBlob ? 'Enregistrement prêt' : 'Votre rêve, avec vos mots'}</strong><p>{recording ? 'Dites tout, même ce qui paraît étrange.' : voiceBlob ? 'Votre voix sera transcrite lorsque vous lancerez l’analyse.' : 'Appuyez sur le bouton et racontez ce dont vous vous souvenez.'}</p></div>
   <button class:record={recording} class="voice-button" disabled={microphonePending} on:click={() => recording ? stopRecording() : startRecording()}>{microphonePending ? 'Accès au microphone…' : recording ? '■ Arrêter' : voiceBlob ? '↻ Réenregistrer' : '◉ Commencer l’enregistrement'}</button>{/if}
-  <div class="form-grid"><label>Date<input type="date" bind:value={draftDate} /></label><label>Catégorie<select bind:value={draftCategory}>{#each categories as category}<option value={category.id}>{category.name}</option>{/each}</select></label></div><label class="private-toggle"><input type="checkbox" checked={draftPrivate} on:change={(event) => { const value = event.currentTarget.checked; event.currentTarget.checked = draftPrivate; makePrivate('draft', value); }} /> Rêve privé</label><button class="primary" disabled={recording || microphonePending || (captureMode === 'vocal' ? !voiceBlob : !draftText.trim())} on:click={saveDraft}>Enregistrer localement</button></section></div>{/if}
+  <div class="form-grid"><DateInput label="Date" bind:value={draftDate} bind:valid={draftDateValid} /><label>Catégorie<select bind:value={draftCategory}>{#each categories as category}<option value={category.id}>{category.name}</option>{/each}</select></label></div><label class="private-toggle"><input type="checkbox" checked={draftPrivate} on:change={(event) => { const value = event.currentTarget.checked; event.currentTarget.checked = draftPrivate; makePrivate('draft', value); }} /> Rêve privé</label><button class="primary" disabled={recording || microphonePending || !draftDateValid || (captureMode === 'vocal' ? !voiceBlob : !draftText.trim())} on:click={saveDraft}>Enregistrer localement</button></section></div>{/if}
 
-{#if selected}<div class="overlay editor-overlay"><section class="modal editor"><button class="close" aria-label="Fermer" on:click={() => selected = null}>×</button>
-  <p class="eyebrow">{selected.status === 'analyse' ? 'RÊVE VALIDÉ' : selected.status.replaceAll('_', ' ').toUpperCase()}</p>
+{#if selected}<div class="overlay editor-overlay"><section class="modal editor"><button class="close" aria-label="Fermer" disabled={loading || saving} on:click={() => selected = null}>×</button>
+  <p class="eyebrow">{textNeedsReanalysis ? 'ANALYSE À ACTUALISER' : selected.status === 'analyse' ? 'RÊVE VALIDÉ' : selected.status.replaceAll('_', ' ').toUpperCase()}</p>
   <h2>{selected.analysis?.title || formatDate(selected.date)}</h2>
   <p class="dream-meta">{formatDate(selected.date)} · {getCategory(selected.categoryId)?.name}{selected.isPrivate ? ' · Privé' : ''}</p>
   <div class="dream-tabs" aria-label="Vue du rêve">
@@ -301,7 +330,7 @@
     <button type="button" class:chosen={dreamTab === 'analysis'} aria-pressed={dreamTab === 'analysis'} on:click={() => dreamTab = 'analysis'}>Analyse</button>
   </div>
   {#if dreamTab === 'dream'}
-    <div class="reading-heading"><span>VOTRE RÉCIT</span><button class="raw-toggle" type="button" on:click={() => editingDreamText = !editingDreamText}>{editingDreamText ? 'Terminer' : 'Modifier le texte'}</button></div>
+    <div class="reading-heading"><span>VOTRE RÉCIT</span><button class="raw-toggle" type="button" on:click={() => editingDreamText = !editingDreamText}>{editingDreamText ? 'Aperçu du texte' : 'Modifier le texte'}</button></div>
     {#if editingDreamText}
       <textarea class="dream-text" aria-label="Texte du rêve" bind:value={selected.cleanedText} placeholder="Votre rêve…"></textarea>
     {:else if selected.cleanedText.trim()}
@@ -311,14 +340,16 @@
     {/if}
     {#if selected.captureMode === 'vocal' && selected.rawText}<button class="raw-toggle" on:click={() => showRaw = !showRaw}>{showRaw ? 'Masquer' : 'Voir'} la transcription brute</button>{#if showRaw}<blockquote>{selected.rawText}</blockquote>{/if}{/if}
   {:else}
-    <div class="form-grid"><label>Date<input type="date" bind:value={selected.date} /></label><label>Catégorie<select bind:value={selected.categoryId}>{#each categories as category}<option value={category.id}>{category.name}</option>{/each}</select></label></div>
+    <div class="form-grid"><DateInput label="Date" bind:value={selected.date} bind:valid={selectedDateValid} /><label>Catégorie<select bind:value={selected.categoryId}>{#each categories as category}<option value={category.id}>{category.name}</option>{/each}</select></label></div>
     <label class="private-toggle"><input type="checkbox" checked={selected.isPrivate} on:change={(event) => { const value = event.currentTarget.checked; event.currentTarget.checked = selected!.isPrivate; makePrivate('selected', value); }} /> Rêve privé</label>
     {#if selected.error}<p class="error">{selected.error}</p>{/if}
-    {#if selected.status !== 'analyse' || selected.analysisStale}<p class="privacy-note">Pour l’analyse, les libellés existants de vos rêves publics sont envoyés au service IA. Pour un rêve privé déverrouillé, ceux des rêves privés le sont aussi.</p><button class="primary" disabled={loading} on:click={async () => { if (selected) { const dreamId = selected.id; await saveSelected(false); await processDream(dreamId); } }}>{loading ? 'Analyse en cours…' : selected.analysisStale ? 'Ré-analyser le texte' : 'Lancer l’analyse'}</button>{#if loading}<LatticeLoader />{/if}{/if}
-    {#if selected.analysis}<section class="analysis"><div class="analysis-head"><h3>{selected.status === 'analyse' ? 'Analyse du rêve' : 'Analyse à valider'}</h3><span class="grade">{selected.analysis.detailLevel}/5</span></div><label>Titre du rêve<input bind:value={selected.analysis.title} maxlength="100" placeholder="Un titre court" /></label><p class="muted">{detailLabels[selected.analysis.detailLevel - 1]}</p><TagEditor label="Personnages" bind:values={editorLists.characters} suggestions={existingLabels.characters} /><TagEditor label="Lieux" bind:values={editorLists.places} suggestions={existingLabels.places} /><TagEditor label="Thèmes" bind:values={editorLists.themes} suggestions={existingLabels.themes} /><TagEditor label="Mots-clés" bind:values={editorLists.keywords} suggestions={existingLabels.keywords} max={5} /><TagEditor label="Émotions" bind:values={editorLists.feelings} suggestions={existingLabels.feelings} /><label>Niveau de détail<select bind:value={selected.analysis.detailLevel}>{#each [1,2,3,4,5] as level}<option value={level}>{level}/5 — {detailLabels[level - 1]}</option>{/each}</select></label></section>{:else}<p class="muted analysis-empty">L’analyse de votre rêve apparaîtra ici.</p>{/if}
+    {#if textNeedsReanalysis}<p class="privacy-note">Le texte a changé depuis cette analyse. Relancez l’analyse pour l’actualiser.</p>{/if}
+    {#if canRunAnalysis}<p class="privacy-note">Pour l’analyse, les libellés existants de vos rêves publics sont envoyés au service IA. Pour un rêve privé déverrouillé, ceux des rêves privés le sont aussi.</p><button class="primary" disabled={loading || saving || !selectedDateValid} on:click={async () => { if (selected) { const dreamId = selected.id; if (await saveSelected(false, false)) await processDream(dreamId); } }}>{loading ? 'Analyse en cours…' : 'Lancer l’analyse'}</button>{#if loading}<LatticeLoader />{/if}{/if}
+    {#if selected.analysis}<section class="analysis"><div class="analysis-head"><h3>{textNeedsReanalysis ? 'Analyse à actualiser' : selected.status === 'analyse' ? 'Analyse du rêve' : 'Analyse à valider'}</h3><span class="grade">{selected.analysis.detailLevel}/5</span></div><label>Titre du rêve<input bind:value={selected.analysis.title} maxlength="100" placeholder="Un titre court" /></label><p class="muted">{detailLabels[selected.analysis.detailLevel - 1]}</p><TagEditor label="Personnages" bind:values={editorLists.characters} suggestions={existingLabels.characters} /><TagEditor label="Lieux" bind:values={editorLists.places} suggestions={existingLabels.places} /><TagEditor label="Thèmes" bind:values={editorLists.themes} suggestions={existingLabels.themes} /><TagEditor label="Mots-clés" bind:values={editorLists.keywords} suggestions={existingLabels.keywords} max={5} /><TagEditor label="Émotions" bind:values={editorLists.feelings} suggestions={existingLabels.feelings} /><label>Niveau de détail<select bind:value={selected.analysis.detailLevel}>{#each [1,2,3,4,5] as level}<option value={level}>{level}/5 — {detailLabels[level - 1]}</option>{/each}</select></label></section>{:else}<p class="muted analysis-empty">L’analyse de votre rêve apparaîtra ici.</p>{/if}
   {/if}
-  <div class="editor-actions"><button class="secondary" on:click={() => saveSelected(false)}>Enregistrer</button>{#if dreamTab === 'analysis' && selected.analysis}<button class="primary" on:click={() => saveSelected(true)}>Valider l’analyse</button>{/if}</div>
-  <button class="danger" on:click={trashSelected}>Supprimer ce rêve</button></section></div>{/if}
+  {#if !selectedDateValid && dreamTab !== 'analysis'}<p class="error">Corrigez la date dans l’onglet Analyse avant d’enregistrer.</p>{/if}
+  <div class="editor-actions"><button class="secondary" disabled={loading || saving || !selectedDateValid} on:click={() => saveSelected(false)}>Enregistrer et fermer</button>{#if dreamTab === 'analysis' && selected.analysis && selected.status === 'a_valider' && !textNeedsReanalysis}<button class="primary" disabled={loading || saving || !selectedDateValid} on:click={() => saveSelected(true)}>Valider l’analyse et fermer</button>{/if}</div>
+  <button class="danger" disabled={loading || saving} on:click={trashSelected}>Supprimer ce rêve</button></section></div>{/if}
 
 {#if pinDialog}<div class="overlay pin-overlay"><section class="modal pin"><button class="close" disabled={pinBusy} aria-label="Annuler le PIN" on:click={() => { pinDialog = false; pinAction = null; }}>×</button><p class="eyebrow">CONFIDENTIALITÉ</p><h2>{pinPurpose === 'create' ? 'Créer votre PIN' : pinPurpose === 'change' ? 'Modifier votre PIN' : 'Déverrouiller les rêves privés'}</h2><p>{pinPurpose === 'create' ? 'Choisissez un PIN secret à six chiffres pour vos rêves privés.' : pinPurpose === 'change' ? 'Saisissez votre PIN actuel, puis choisissez le nouveau.' : 'Saisissez votre PIN pour consulter vos rêves privés.'}</p>
   {#if pinPurpose !== 'create'}<label>{pinPurpose === 'change' ? 'PIN actuel' : 'PIN'}<input type="password" inputmode="numeric" maxlength="6" pattern="[0-9]*" bind:value={pinValue} placeholder="••••••" aria-label="PIN actuel" /></label>{/if}

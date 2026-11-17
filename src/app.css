@@ -51,3 +51,13 @@ button.day.selected-day { outline: 1px solid #bdaaff; outline-offset: -1px; back
 
 .calendar-today { display:flex; justify-content:center; margin:-5px 0 16px; }
 .calendar-today button { padding:7px 14px; font-size:13px; }
+
+.date-error { display:block; margin-top:5px; color:#ffbbca; font-size:12px; line-height:1.35; }
+input[aria-invalid="true"] { border-color:#ff9db8; }
+
+.date-control { position:relative; min-width:0; }
+.date-control label { display:block; }
+.date-control label input { padding-right:50px; }
+.date-control .date-picker { position:absolute; top:18px; right:4px; width:40px; height:40px; padding:0; border:0; background:transparent; color:transparent; color-scheme:dark; cursor:pointer; }
+.date-picker::-webkit-datetime-edit { display:none; }
+.date-picker::-webkit-calendar-picker-indicator { width:24px; height:24px; margin:0 auto; padding:0; cursor:pointer; }
