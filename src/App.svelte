@@ -11,6 +11,7 @@
   import { cleanAnalysis, detailLabels, formatDate, id, now, today } from './lib/utils';
   import { dreamColor, dreamTitle, needsProcessing } from './lib/presentation';
   import { resetPinAndDeletePrivateDreams, savePin, verifyPin } from './lib/privacy';
+  import { createBackup, restoreBackup } from './lib/backup';
   import type { BackupFile, Category, Dream, DreamAnalysis, DreamStatus, Settings } from './lib/types';
 
   type Tab = 'accueil' | 'calendrier' | 'recherche' | 'stats' | 'reglages';
@@ -34,7 +35,8 @@
   let recording = false;
   let loading = false;
   let notice = '';
-  let unlocked = false;
+  let privateSearch = false;
+  let privateStats = false;
   let pinDialog = false;
   let pinValue = '';
   let pinPurpose: 'unlock' | 'create' | 'change' = 'unlock';
@@ -60,13 +62,14 @@
 
   $: textNeedsReanalysis = Boolean(selected?.analysis && (selected.analysisStale || selected.cleanedText !== savedDreamText));
   $: canRunAnalysis = Boolean(selected && (textNeedsReanalysis || ['a_transcrire', 'a_nettoyer', 'a_analyser', 'erreur'].includes(selected.status)));
-  $: existingLabels = collectLabels(dreams, Boolean(selected?.isPrivate && unlocked));
+  $: existingLabels = collectLabels(dreams.filter((dream) => !dream.isPrivate || dream.id === selected?.id), Boolean(selected?.isPrivate));
   $: visibleDreams = dreams.filter((dream) => !dream.deletedAt);
-  $: accessibleDreams = visibleDreams.filter((dream) => !dream.isPrivate || unlocked);
   $: pendingDreams = visibleDreams.filter(needsProcessing);
   $: dayDreams = visibleDreams.filter((dream) => dream.date === daySelected).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  $: filteredDreams = accessibleDreams.filter(matchesSearch).sort((a, b) => b.date.localeCompare(a.date));
-  $: stats = makeStats(accessibleDreams.filter((dream) => dream.date >= statsFrom && dream.date <= statsTo), categories);
+  $: filteredDreams = visibleDreams.filter((dream) => Boolean(dream.isPrivate) === privateSearch && matchesSearch(dream, searchTerm, searchCategory)).sort((a, b) => b.date.localeCompare(a.date));
+  $: stats = makeStats(visibleDreams.filter((dream) => (!dream.isPrivate || privateStats) && dream.date >= statsFrom && dream.date <= statsTo), categories);
+  $: if (tab !== 'recherche' && privateSearch) { privateSearch = false; searchTerm = ''; searchCategory = ''; }
+  $: if (tab !== 'stats') privateStats = false;
 
   onMount(async () => { await initialiseDatabase(); await refresh(); });
 
@@ -85,22 +88,23 @@
     editorLists = { characters: [...a.characters], places: [...a.places], themes: [...a.themes], keywords: [...a.keywords], feelings: [...a.feelings] };
   }
   function openDream(dream: Dream) {
-    if (dream.isPrivate && !unlocked) { openPin(settings.pinHash ? 'unlock' : 'create', () => openDream(dream)); return; }
+    if (dream.isPrivate) { openPin(settings.pinHash ? 'unlock' : 'create', () => showDream(dream)); return; }
+    showDream(dream);
+  }
+  function showDream(dream: Dream) {
     selected = structuredClone(dream); selectedDateValid = true; savedDreamText = dream.cleanedText; setEditorLists(selected.analysis); showRaw = false; dreamTab = 'dream'; editingDreamText = false;
   }
   function openPin(purpose: typeof pinPurpose, action: (() => void | Promise<void>) | null = null) {
     pinPurpose = purpose; pinValue = ''; newPinValue = ''; confirmPinValue = ''; pinAction = action; pinDialog = true;
   }
-  function makePrivate(target: 'draft' | 'selected', value: boolean) {
-    const apply = () => { if (target === 'draft') draftPrivate = value; else if (selected) selected.isPrivate = value; };
-    if (value && (!settings.pinHash || !unlocked)) openPin(settings.pinHash ? 'unlock' : 'create', apply);
-    else apply();
+  function setPrivateSearch(value: boolean) {
+    privateSearch = value; searchTerm = ''; searchCategory = '';
   }
   async function saveDraft() {
     if (recording || microphonePending || !draftDateValid) return;
     const isVoice = captureMode === 'vocal';
     if (isVoice ? !voiceBlob : !draftText.trim()) return message('Écrivez votre rêve ou enregistrez votre voix.');
-    if (draftPrivate && (!settings.pinHash || !unlocked)) { openPin(settings.pinHash ? 'unlock' : 'create', saveDraft); return; }
+    if (draftPrivate && !settings.pinHash) { openPin('create', saveDraft); return; }
     const dream: Dream = {
       id: id(), date: draftDate, createdAt: now(), updatedAt: now(), captureMode: isVoice ? 'vocal' : 'texte',
       cleanedText: isVoice ? '' : draftText.trim(), categoryId: draftCategory, isPrivate: draftPrivate,
@@ -108,7 +112,7 @@
     };
     await db.dreams.add(dream);
     if (isVoice && voiceBlob) await db.audio.put({ dreamId: dream.id, blob: voiceBlob, mimeType: voiceBlob.type, createdAt: now() });
-    composer = false; await refresh(); openDream(dream); message(importingLegacy ? 'Rêve importé et prêt à être analysé.' : 'Rêve enregistré localement.');
+    composer = false; await refresh(); showDream(dream); message(importingLegacy ? 'Rêve importé et prêt à être analysé.' : 'Rêve enregistré localement.');
   }
   async function startRecording() {
     if (microphonePending || recording) return;
@@ -147,7 +151,8 @@
       }
       dream = (await db.dreams.get(dream.id))!;
       if (dream.status === 'a_analyser' || dream.analysisStale || dream.status === 'erreur') {
-        dream.analysis = cleanAnalysis(await extract(dream.cleanedText, settings.profile, collectLabels(dreams, dream.isPrivate && unlocked)));
+        const currentDreamId = dream.id;
+        dream.analysis = cleanAnalysis(await extract(dream.cleanedText, settings.profile, collectLabels(dreams.filter((entry) => !entry.isPrivate || entry.id === currentDreamId), dream.isPrivate)));
         dream.status = 'a_valider'; dream.analysisStale = false; dream.error = undefined; dream.retryStatus = undefined;
         await db.dreams.put({ ...dream, updatedAt: now() });
       }
@@ -164,6 +169,10 @@
   }
   async function saveSelected(validate = false, close = true): Promise<boolean> {
     if (!selected || saving || !selectedDateValid) return false;
+    if (selected.isPrivate && !settings.pinHash) {
+      openPin('create', async () => { await saveSelected(validate, close); });
+      return false;
+    }
     saving = true;
     try {
       const stored = await db.dreams.get(selected.id);
@@ -190,13 +199,19 @@
       return false;
     } finally { saving = false; }
   }
+  async function runSelectedAnalysis() {
+    if (!selected) return;
+    if (selected.isPrivate && !settings.pinHash) { openPin('create', runSelectedAnalysis); return; }
+    const dreamId = selected.id;
+    if (await saveSelected(false, false)) await processDream(dreamId);
+  }
   async function trashSelected() {
     if (!selected || !confirm('Supprimer ce rêve ? Il restera dans la corbeille pendant 30 jours et pourra être restauré depuis les réglages.')) return;
     await db.dreams.update(selected.id, { deletedAt: now(), updatedAt: now() }); selected = null; await refresh(); message('Rêve déplacé dans la corbeille.');
   }
-  function matchesSearch(dream: Dream) {
-    if (searchCategory && dream.categoryId !== searchCategory) return false;
-    const query = searchTerm.trim().toLocaleLowerCase('fr-FR'); if (!query) return true;
+  function matchesSearch(dream: Dream, term: string, category: string) {
+    if (category && dream.categoryId !== category) return false;
+    const query = term.trim().toLocaleLowerCase('fr-FR'); if (!query) return true;
     return [...(dream.analysis?.characters ?? []), ...(dream.analysis?.keywords ?? [])].some((value) => value.toLocaleLowerCase('fr-FR').includes(query));
   }
   async function submitPin() {
@@ -210,16 +225,12 @@
         await savePin(newPinValue, pinPurpose === 'change' ? pinValue : undefined);
         settings = (await db.settings.get('main'))!;
       }
-      unlocked = true; pinDialog = false;
+      pinDialog = false;
       const action = pinAction; pinAction = null;
-      message(pinPurpose === 'unlock' ? 'Rêves privés déverrouillés.' : 'PIN enregistré.');
+      if (pinPurpose !== 'unlock') message('PIN enregistré.');
       await action?.();
     } catch (error) { message(error instanceof Error ? error.message : 'Impossible de modifier le PIN.'); }
     finally { pinBusy = false; }
-  }
-  function lockPrivateDreams() {
-    unlocked = false; if (selected?.isPrivate) selected = null; draftPrivate = false;
-    message('Rêves privés verrouillés.');
   }
   async function resetPin() {
     if (loading) return;
@@ -227,13 +238,13 @@
     if (!confirm(`Réinitialiser le PIN supprimera définitivement ${count} rêve(s) privé(s), y compris dans la corbeille, et leurs audios. Cette suppression est irréversible. Continuer ?`)) return;
     try {
       const deleted = await resetPinAndDeletePrivateDreams();
-      unlocked = false; selected = null; draftPrivate = false; pinAction = null; pinDialog = false;
+      privateSearch = false; privateStats = false; selected = null; draftPrivate = false; pinAction = null; pinDialog = false;
       await refresh(); message(`PIN réinitialisé. ${deleted} rêve(s) privé(s) supprimé(s) définitivement.`);
     } catch { message('La réinitialisation a échoué. Réessayez.'); }
   }
   async function saveProfile() { await db.settings.put(settings); message('Profil personnel enregistré.'); }
   async function exportBackup() {
-    const backup: BackupFile = { format: 'reveil-backup', version: 1, exportedAt: now(), dreams: visibleDreams.filter((dream) => !dream.isPrivate || unlocked), categories, settings: { profile: settings.profile, pinSalt: settings.pinSalt, pinHash: settings.pinHash } };
+    const backup = createBackup(dreams, categories, settings, now());
     const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
     const link = document.createElement('a'); link.href = url; link.download = `reveil-sauvegarde-${today()}.json`; link.click(); URL.revokeObjectURL(url);
   }
@@ -244,8 +255,8 @@
       if (backup.format !== 'reveil-backup' || backup.version !== 1) throw new Error('Ce fichier n’est pas une sauvegarde Rêveil compatible.');
       const replace = confirm(`Sauvegarde : ${backup.dreams.length} rêves. OK = remplacer les données locales ; Annuler = fusionner.`);
       if (replace && !confirm('Confirmer le remplacement : vos rêves locaux actuels seront supprimés.')) return;
-      if (replace) await db.transaction('rw', db.dreams, db.categories, db.settings, async () => { await db.dreams.clear(); await db.categories.clear(); await db.categories.bulkPut(backup.categories); await db.dreams.bulkPut(backup.dreams); await db.settings.put({ id: 'main', ...backup.settings }); });
-      else { await db.categories.bulkPut(backup.categories); for (const dream of backup.dreams) if (!await db.dreams.get(dream.id)) await db.dreams.put(dream); }
+      await restoreBackup(backup, replace);
+      privateSearch = false; privateStats = false;
       await refresh(); message('Sauvegarde importée.');
     } catch (error) { message(error instanceof Error ? error.message : 'Import impossible.'); }
     input.value = '';
@@ -276,36 +287,36 @@
     <section class="hero"><p class="eyebrow">{new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())}</p><h2>Qu’avez-vous rêvé<br />cette nuit&nbsp;?</h2><p>Gardez la trace de l’étrange avant qu’il ne s’efface.</p><button class="primary capture" on:click={() => openComposer()}>✦ Raconter un rêve</button></section>
     <section class="section"><div class="section-heading"><h3>À traiter</h3><span>{pendingDreams.length}</span></div>
       {#if pendingDreams.length === 0}<div class="empty">Votre journal est à jour.</div>{/if}
-      {#each pendingDreams.slice(0, 4) as dream}<button class="dream-card pending" on:click={() => openDream(dream)}><span class="dot" style={`background:${dreamColor(dream, categories, unlocked)}`}></span><span><strong>{dreamTitle(dream, unlocked)}</strong><small>{formatDate(dream.date)} · À traiter</small></span><b>›</b></button>{/each}
+      {#each pendingDreams.slice(0, 4) as dream}<button class="dream-card pending" on:click={() => openDream(dream)}><span class="dot" style={`background:${dreamColor(dream, categories)}`}></span><span><strong>{dreamTitle(dream, false)}</strong><small>{formatDate(dream.date)} · À traiter</small></span><b>›</b></button>{/each}
     </section>
     <section class="section"><div class="section-heading"><h3>Derniers rêves</h3><button class="text-button" on:click={() => tab = 'calendrier'}>Voir tout</button></div>
-      {#each accessibleDreams.sort((a,b) => b.date.localeCompare(a.date)).slice(0, 3) as dream}<button class="dream-card" class:pending={needsProcessing(dream)} on:click={() => openDream(dream)}><span class="dot" style={`background:${dreamColor(dream, categories, unlocked)}`}></span><span><strong>{dreamTitle(dream, unlocked)}</strong><small>{formatDate(dream.date)} · {needsProcessing(dream) ? 'À traiter' : getCategory(dream.categoryId)?.name}</small></span><b>›</b></button>{/each}
+      {#each [...visibleDreams].sort((a,b) => b.date.localeCompare(a.date)).slice(0, 3) as dream}<button class="dream-card" class:pending={needsProcessing(dream)} on:click={() => openDream(dream)}><span class="dot" style={`background:${dreamColor(dream, categories)}`}></span><span><strong>{dreamTitle(dream, false)}</strong><small>{formatDate(dream.date)} · {needsProcessing(dream) ? 'À traiter' : getCategory(dream.categoryId)?.name}</small></span><b>›</b></button>{/each}
     </section>
   {:else if tab === 'calendrier'}
     <section class="page-title"><p class="eyebrow">VOS NUITS</p><h2>Calendrier</h2></section>
     <div class="month-nav"><button aria-label="Mois précédent" on:click={() => moveMonth(-1)}>‹</button><strong>{new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric' }).format(month)}</strong><button aria-label="Mois suivant" on:click={() => moveMonth(1)}>›</button></div>
     <div class="calendar-today"><button class="secondary" type="button" on:click={goToToday}>Aujourd’hui</button></div>
     <div class="weekdays">{#each ['L','M','M','J','V','S','D'] as label}<span>{label}</span>{/each}</div>
-    <div class="calendar">{#each daysInCalendar(month) as day}{#if day}<button class="day" class:selected-day={daySelected === dateKey(day)} aria-pressed={daySelected === dateKey(day)} aria-label={`Voir les rêves du ${formatDate(dateKey(day))}`} on:click={() => daySelected = dateKey(day)}><span>{day.getDate()}</span>{#each visibleDreams.filter((dream) => dream.date === dateKey(day)) as dream}<span class="calendar-dream" style={`background:${dreamColor(dream, categories, unlocked)}`} title={needsProcessing(dream) ? 'À traiter' : getCategory(dream.categoryId)?.name}>{dream.isPrivate && !unlocked ? '⌁' : '✦'}</span>{/each}</button>{:else}<div class="day blank"></div>{/if}{/each}</div>
+    <div class="calendar">{#each daysInCalendar(month) as day}{#if day}<button class="day" class:selected-day={daySelected === dateKey(day)} aria-pressed={daySelected === dateKey(day)} aria-label={`Voir les rêves du ${formatDate(dateKey(day))}`} on:click={() => daySelected = dateKey(day)}><span>{day.getDate()}</span>{#each visibleDreams.filter((dream) => dream.date === dateKey(day)) as dream}<span class="calendar-dream" style={`background:${dreamColor(dream, categories)}`} title={needsProcessing(dream) ? 'À traiter' : getCategory(dream.categoryId)?.name}>{dream.isPrivate ? '⌁' : '✦'}</span>{/each}</button>{:else}<div class="day blank"></div>{/if}{/each}</div>
     <p class="muted">Rouge : à traiter · Plus clair : plus détaillé · Une case par rêve</p>
     <section class="section"><div class="section-heading"><h3>{formatDate(daySelected)}</h3><span>{dayDreams.length} rêve(s)</span></div>
-      {#each dayDreams as dream}<button class="dream-card" class:pending={needsProcessing(dream)} on:click={() => openDream(dream)}><span class="dot" style={`background:${dreamColor(dream, categories, unlocked)}`}></span><span><strong>{dreamTitle(dream, unlocked)}</strong><small>{needsProcessing(dream) ? 'À traiter' : getCategory(dream.categoryId)?.name}{dream.isPrivate ? ' · Privé' : ''}</small></span><b>›</b></button>{:else}<p class="empty">Aucun rêve enregistré ce jour-là.</p>{/each}
+      {#each dayDreams as dream}<button class="dream-card" class:pending={needsProcessing(dream)} on:click={() => openDream(dream)}><span class="dot" style={`background:${dreamColor(dream, categories)}`}></span><span><strong>{dreamTitle(dream, false)}</strong><small>{needsProcessing(dream) ? 'À traiter' : getCategory(dream.categoryId)?.name}{dream.isPrivate ? ' · Privé' : ''}</small></span><b>›</b></button>{:else}<p class="empty">Aucun rêve enregistré ce jour-là.</p>{/each}
     </section>
   {:else if tab === 'recherche'}
-    <section class="page-title"><p class="eyebrow">RETROUVER</p><h2>Recherche</h2></section>
+    <section class="page-title"><p class="eyebrow">RETROUVER</p><h2>Recherche</h2><button class="secondary privacy-control" type="button" aria-pressed={privateSearch} on:click={() => privateSearch ? setPrivateSearch(false) : openPin(settings.pinHash ? 'unlock' : 'create', () => { if (tab === 'recherche') setPrivateSearch(true); })}>{privateSearch ? '🔓 Rêves privés · revenir aux rêves publics' : '🔒 Rechercher dans les rêves privés'}</button></section>
     <input class="search" bind:value={searchTerm} placeholder="Personnage ou mot-clé…" />
     <select bind:value={searchCategory}><option value="">Toutes les catégories</option>{#each categories as category}<option value={category.id}>{category.name}</option>{/each}</select>
-    <section class="section">{#if !unlocked && visibleDreams.some((dream) => dream.isPrivate)}<p class="muted">Les rêves privés verrouillés n’apparaissent pas dans les résultats.</p>{/if}{#each filteredDreams as dream}<button class="dream-card" class:pending={needsProcessing(dream)} on:click={() => openDream(dream)}><span class="dot" style={`background:${dreamColor(dream, categories, unlocked)}`}></span><span><strong>{dreamTitle(dream, unlocked)}</strong><small>{formatDate(dream.date)} · {(dream.analysis?.keywords ?? []).join(', ')}</small></span><b>›</b></button>{:else}<div class="empty">Aucun rêve ne correspond.</div>{/each}</section>
+    <section class="section">{#if privateSearch}<p class="muted">Recherche dans les rêves privés.</p>{:else if visibleDreams.some((dream) => dream.isPrivate)}<p class="muted">Les rêves privés n’apparaissent pas dans les résultats publics.</p>{/if}{#each filteredDreams as dream}<button class="dream-card" class:pending={needsProcessing(dream)} on:click={() => openDream(dream)}><span class="dot" style={`background:${dreamColor(dream, categories, privateSearch)}`}></span><span><strong>{dreamTitle(dream, privateSearch)}</strong><small>{formatDate(dream.date)} · {(dream.analysis?.keywords ?? []).join(', ')}</small></span><b>›</b></button>{:else}<div class="empty">Aucun rêve ne correspond.</div>{/each}</section>
   {:else if tab === 'stats'}
-    <section class="page-title"><p class="eyebrow">MOTIFS RÉCURRENTS</p><h2>Statistiques</h2></section>
+    <section class="page-title"><p class="eyebrow">MOTIFS RÉCURRENTS</p><h2>Statistiques</h2><button class="secondary privacy-control" type="button" aria-pressed={privateStats} on:click={() => privateStats ? privateStats = false : openPin(settings.pinHash ? 'unlock' : 'create', () => { if (tab === 'stats') privateStats = true; })}>{privateStats ? '🔓 Exclure les rêves privés' : '🔒 Inclure les rêves privés'}</button></section>
     <div class="date-range"><DateInput label="Du" bind:value={statsFrom} bind:valid={statsFromValid} /><DateInput label="Au" bind:value={statsTo} bind:valid={statsToValid} /></div>
-    {#if !unlocked && visibleDreams.some((dream) => dream.isPrivate)}<p class="privacy-note">⌁ Les rêves privés verrouillés sont exclus des statistiques.</p>{/if}
+    {#if !privateStats && visibleDreams.some((dream) => dream.isPrivate)}<p class="privacy-note">⌁ Les rêves privés sont exclus des statistiques.</p>{/if}
     <div class="metrics"><div><strong>{stats.dreamCount}</strong><span>rêves analysés</span></div><div><strong>{stats.averageDetail ? stats.averageDetail.toFixed(1) : '—'}</strong><span>détail moyen / 5</span></div><div><strong>{stats.averageWords ? Math.round(stats.averageWords) : '—'}</strong><span>mots en moyenne</span></div></div>
     {#each [{label:'Personnages',data:stats.characters},{label:'Lieux',data:stats.places},{label:'Thèmes',data:stats.themes},{label:'Émotions',data:stats.feelings},{label:'Associations',data:stats.pairs},{label:'Catégories',data:stats.byCategory}] as block}<section class="stat-block"><h3>{block.label}</h3>{#if block.data.length}{#each block.data.slice(0, 5) as item}<div class="stat-row"><span>{item.label}</span><b>{item.count}</b></div>{/each}{:else}<p class="muted">Pas encore de données.</p>{/if}</section>{/each}
   {:else if tab === 'reglages'}
     <section class="page-title"><p class="eyebrow">À VOTRE IMAGE</p><h2>Réglages</h2></section>
     <section class="setting-card"><h3>Profil personnel</h3><p>Ajoutez les personnes, surnoms et contextes que l’IA doit connaître.</p><textarea bind:value={settings.profile} placeholder="Ex. « Les gars » désigne Lucien, Paul et Jean."></textarea><button class="secondary" on:click={saveProfile}>Enregistrer le profil</button></section>
-    <section class="setting-card"><h3>Confidentialité</h3><p>Le PIN masque les rêves dans l’interface. Il ne chiffre pas IndexedDB.</p>{#if settings.pinHash}<button class="secondary" on:click={() => unlocked ? lockPrivateDreams() : openPin('unlock')}>{unlocked ? 'Verrouiller les rêves privés' : 'Déverrouiller les rêves privés'}</button><button class="secondary" on:click={() => openPin('change')}>Modifier le PIN</button><button class="danger" disabled={loading} on:click={resetPin}>PIN oublié ? Réinitialiser</button><p>La réinitialisation supprime définitivement tous les rêves privés, même dans la corbeille.</p>{:else}<p>Votre PIN sera créé lors du premier rêve marqué comme privé.</p>{/if}</section>
+    <section class="setting-card"><h3>Confidentialité</h3><p>Le PIN masque les rêves dans l’interface. Il ne chiffre pas IndexedDB.</p>{#if settings.pinHash}<button class="secondary" on:click={() => openPin('change')}>Modifier le PIN</button><button class="danger" disabled={loading} on:click={resetPin}>PIN oublié ? Réinitialiser</button><p>La réinitialisation supprime définitivement tous les rêves privés, même dans la corbeille.</p>{:else}<p>Votre PIN sera créé lors du premier rêve marqué comme privé.</p>{/if}</section>
     <section class="setting-card"><h3>Catégories</h3>{#each categories as category}<div class="category-line"><span class="dot" style={`background:${category.color}`}></span>{category.name}</div>{/each}<button class="secondary" on:click={addCategory}>+ Nouvelle catégorie</button></section>
     <section class="setting-card"><h3>Import et sauvegarde</h3><button class="secondary" on:click={() => openComposer(true)}>Importer un rêve ancien</button><button class="secondary" on:click={exportBackup}>Exporter mes rêves (sans audio)</button><label class="secondary file-input">Importer une sauvegarde JSON<input type="file" accept="application/json" on:change={importBackup} /></label></section>
     <section class="setting-card"><h3>Corbeille</h3>{#each dreams.filter((dream) => dream.deletedAt) as dream}<div class="trash-line"><span>{formatDate(dream.date)}</span><button class="text-button" on:click={() => restore(dream)}>Restaurer</button></div>{:else}<p class="muted">La corbeille est vide.</p>{/each}</section>
@@ -319,7 +330,7 @@
 {#if composer}<div class="overlay"><section class="modal composer"><button class="close" disabled={microphonePending} on:click={() => { if (recording) stopRecording(); composer = false; }}>×</button><p class="eyebrow">{importingLegacy ? 'SOUVENIR ANCIEN' : 'NOUVEAU RÊVE'}</p><h2>{importingLegacy ? 'Importer un rêve' : 'Racontez-le vite'}</h2><div class="mode"><button class:chosen={captureMode === 'texte'} aria-pressed={captureMode === 'texte'} disabled={recording || microphonePending} on:click={() => captureMode = 'texte'}>Écrire</button><button class:chosen={captureMode === 'vocal'} aria-pressed={captureMode === 'vocal'} disabled={recording || microphonePending} on:click={() => captureMode = 'vocal'}>Parler</button></div>
   {#if captureMode === 'texte'}<textarea bind:value={draftText} placeholder="Tout ce dont vous vous souvenez…"></textarea>{:else}<div class="recording-box"><span class:recording>●</span><strong>{recording ? 'Enregistrement en cours…' : voiceBlob ? 'Enregistrement prêt' : 'Votre rêve, avec vos mots'}</strong><p>{recording ? 'Dites tout, même ce qui paraît étrange.' : voiceBlob ? 'Votre voix sera transcrite lorsque vous lancerez l’analyse.' : 'Appuyez sur le bouton et racontez ce dont vous vous souvenez.'}</p></div>
   <button class:record={recording} class="voice-button" disabled={microphonePending} on:click={() => recording ? stopRecording() : startRecording()}>{microphonePending ? 'Accès au microphone…' : recording ? '■ Arrêter' : voiceBlob ? '↻ Réenregistrer' : '◉ Commencer l’enregistrement'}</button>{/if}
-  <div class="form-grid"><DateInput label="Date" bind:value={draftDate} bind:valid={draftDateValid} /><label>Catégorie<select bind:value={draftCategory}>{#each categories as category}<option value={category.id}>{category.name}</option>{/each}</select></label></div><label class="private-toggle"><input type="checkbox" checked={draftPrivate} on:change={(event) => { const value = event.currentTarget.checked; event.currentTarget.checked = draftPrivate; makePrivate('draft', value); }} /> Rêve privé</label><button class="primary" disabled={recording || microphonePending || !draftDateValid || (captureMode === 'vocal' ? !voiceBlob : !draftText.trim())} on:click={saveDraft}>Enregistrer localement</button></section></div>{/if}
+  <div class="form-grid"><DateInput label="Date" bind:value={draftDate} bind:valid={draftDateValid} /><label>Catégorie<select bind:value={draftCategory}>{#each categories as category}<option value={category.id}>{category.name}</option>{/each}</select></label></div><label class="private-toggle"><input type="checkbox" bind:checked={draftPrivate} /> Rêve privé</label><button class="primary" disabled={recording || microphonePending || !draftDateValid || (captureMode === 'vocal' ? !voiceBlob : !draftText.trim())} on:click={saveDraft}>Enregistrer localement</button></section></div>{/if}
 
 {#if selected}<div class="overlay editor-overlay"><section class="modal editor"><button class="close" aria-label="Fermer" disabled={loading || saving} on:click={() => selected = null}>×</button>
   <p class="eyebrow">{textNeedsReanalysis ? 'ANALYSE À ACTUALISER' : selected.status === 'analyse' ? 'RÊVE VALIDÉ' : selected.status.replaceAll('_', ' ').toUpperCase()}</p>
@@ -341,10 +352,10 @@
     {#if selected.captureMode === 'vocal' && selected.rawText}<button class="raw-toggle" on:click={() => showRaw = !showRaw}>{showRaw ? 'Masquer' : 'Voir'} la transcription brute</button>{#if showRaw}<blockquote>{selected.rawText}</blockquote>{/if}{/if}
   {:else}
     <div class="form-grid"><DateInput label="Date" bind:value={selected.date} bind:valid={selectedDateValid} /><label>Catégorie<select bind:value={selected.categoryId}>{#each categories as category}<option value={category.id}>{category.name}</option>{/each}</select></label></div>
-    <label class="private-toggle"><input type="checkbox" checked={selected.isPrivate} on:change={(event) => { const value = event.currentTarget.checked; event.currentTarget.checked = selected!.isPrivate; makePrivate('selected', value); }} /> Rêve privé</label>
+    <label class="private-toggle"><input type="checkbox" bind:checked={selected.isPrivate} /> Rêve privé</label>
     {#if selected.error}<p class="error">{selected.error}</p>{/if}
     {#if textNeedsReanalysis}<p class="privacy-note">Le texte a changé depuis cette analyse. Relancez l’analyse pour l’actualiser.</p>{/if}
-    {#if canRunAnalysis}<p class="privacy-note">Pour l’analyse, les libellés existants de vos rêves publics sont envoyés au service IA. Pour un rêve privé déverrouillé, ceux des rêves privés le sont aussi.</p><button class="primary" disabled={loading || saving || !selectedDateValid} on:click={async () => { if (selected) { const dreamId = selected.id; if (await saveSelected(false, false)) await processDream(dreamId); } }}>{loading ? 'Analyse en cours…' : 'Lancer l’analyse'}</button>{#if loading}<LatticeLoader />{/if}{/if}
+    {#if canRunAnalysis}<p class="privacy-note">Pour l’analyse, les libellés existants de vos rêves publics sont envoyés au service IA, ainsi que ceux du rêve en cours.</p><button class="primary" disabled={loading || saving || !selectedDateValid} on:click={runSelectedAnalysis}>{loading ? 'Analyse en cours…' : 'Lancer l’analyse'}</button>{#if loading}<LatticeLoader />{/if}{/if}
     {#if selected.analysis}<section class="analysis"><div class="analysis-head"><h3>{textNeedsReanalysis ? 'Analyse à actualiser' : selected.status === 'analyse' ? 'Analyse du rêve' : 'Analyse à valider'}</h3><span class="grade">{selected.analysis.detailLevel}/5</span></div><label>Titre du rêve<input bind:value={selected.analysis.title} maxlength="100" placeholder="Un titre court" /></label><p class="muted">{detailLabels[selected.analysis.detailLevel - 1]}</p><TagEditor label="Personnages" bind:values={editorLists.characters} suggestions={existingLabels.characters} /><TagEditor label="Lieux" bind:values={editorLists.places} suggestions={existingLabels.places} /><TagEditor label="Thèmes" bind:values={editorLists.themes} suggestions={existingLabels.themes} /><TagEditor label="Mots-clés" bind:values={editorLists.keywords} suggestions={existingLabels.keywords} max={5} /><TagEditor label="Émotions" bind:values={editorLists.feelings} suggestions={existingLabels.feelings} /><label>Niveau de détail<select bind:value={selected.analysis.detailLevel}>{#each [1,2,3,4,5] as level}<option value={level}>{level}/5 — {detailLabels[level - 1]}</option>{/each}</select></label></section>{:else}<p class="muted analysis-empty">L’analyse de votre rêve apparaîtra ici.</p>{/if}
   {/if}
   {#if !selectedDateValid && dreamTab !== 'analysis'}<p class="error">Corrigez la date dans l’onglet Analyse avant d’enregistrer.</p>{/if}

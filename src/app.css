@@ -51,6 +51,7 @@ button.day.selected-day { outline: 1px solid #bdaaff; outline-offset: -1px; back
 
 .calendar-today { display:flex; justify-content:center; margin:-5px 0 16px; }
 .calendar-today button { padding:7px 14px; font-size:13px; }
+.privacy-control { margin-top:14px; font-size:13px; }
 
 .date-error { display:block; margin-top:5px; color:#ffbbca; font-size:12px; line-height:1.35; }
 input[aria-invalid="true"] { border-color:#ff9db8; }
